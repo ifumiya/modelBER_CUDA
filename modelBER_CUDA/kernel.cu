@@ -6,18 +6,16 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <vector_functions.h>
-
 #include <thrust/reduce.h>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
-
 
 #include <stdio.h>
 #include <time.h>
 
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <chrono>
 
 
 #include "modelBER_params.cuh"
@@ -73,7 +71,7 @@ __device__ inline double calcBrillouin(double s, double x)
 
 __device__ double calc_sFe_Mean(double temp, double cu)
 {
-	double vl = 0.0;
+	double vl = S_FE_MEAN_ERROR;
 	double vr = S_FE_MEAN_MAX;
 	double v;
 
@@ -114,12 +112,12 @@ __device__ double calcKb(double temp, double hw, double cu)
 	return kb;
 }
 
-__device__ void calcKb(double temp, double hw, double cu, double &kbp, double &kbm)
+__device__ void calcKb(double temp, double hw, double cu, double tc, double &kbp, double &kbm)
 {
 
-	double temp_curie = calcCurieFromCu(cu);
+
 	kbm = kbp = 0;
-	if (temp >= temp_curie) return;
+	if (tc <= temp) return;
 
 	double dFeFe = BULK_D_FE_FE * KU_KBULK;
 
@@ -150,10 +148,18 @@ void calcKbListKernel(double *kb_list, int kb_list_size, double hw)
 
 #if BER_ALGORITHM == 0
 
+/*
+###
+###  単純モンテカルロ法
+###
+#########################################################################################################################
+*/
+
+
 __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count, double hw)
 {
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_tcs[GRAIN_COUNT];			// グレインごとのTc
+	double grain_tc[GRAIN_COUNT];			// グレインごとのTc
 	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
 	double grain_area[GRAIN_COUNT];			// グレインごとの面積
 	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
@@ -170,8 +176,8 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tcs[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD + TEMP_CURIE_MEAN;
-		grain_cu[i] = calcCuFromCurie(grain_tcs[i]);
+		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
@@ -198,7 +204,7 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 			// hw = -1 = 順方向
 			// grain_dir = 1 逆方向
 			// hw * grain_dir = -1 hw方向への反転確率
-			if (temp > grain_tcs[k]) continue;
+			if (temp > grain_tc[k]) continue;
 
 			double rev_prob = exp(-calcKb(temp, signed_hw * grain_dir[k], grain_cu[k]) * grain_area[k]);
 			double dice = curand_uniform(&rand_stat);
@@ -248,7 +254,7 @@ void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double h
 __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_list, double hw)
 {
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_tcs[GRAIN_COUNT];			// グレインごとのTc
+	double grain_tc[GRAIN_COUNT];			// グレインごとのTc
 	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
 	double grain_area[GRAIN_COUNT];			// グレインごとの面積
 	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
@@ -267,8 +273,8 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tcs[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD + TEMP_CURIE_MEAN;
-		grain_cu[i] = calcCuFromCurie(grain_tcs[i]);
+		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
@@ -297,7 +303,7 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 			// hw = -1 = 順方向
 			// grain_dir = 1 逆方向
 			// hw * grain_dir = -1 hw方向への反転確率
-			if (temp > grain_tcs[k]) continue;
+			if (temp > grain_tc[k]) continue;
 
 			double rev_prob = exp(-calcKb(temp, signed_hw * grain_dir[k], grain_cu[k]) * grain_area[k]);
 			double dice = curand_uniform(&rand_stat);
@@ -373,55 +379,62 @@ void calcHwList(FILE *fp)
 }
 
 #else
+/*
+###
+###  確率　・　パターン法
+###
+#########################################################################################################################
+*/
 
 __device__ inline double calcPattern(double *grain_area, double *grain_prov)
 {
 	double bit_error_rate = 0;
-#define GAX(n) (0)
-#define GAO(n) (grain_area[n])
-#define GPX(n) (grain_prov[n])
-#define GPO(n) (1 - grain_area[n])
+#define GA_(n) (0)
+#define GAM(n) (grain_area[n])
+#define GP_(n) (grain_prov[n])
+#define GPM(n) (1 - grain_area[n])
 
 #if GRAIN_COUNT == 1
 	if (grain_area[0] < READABLE_THRETH) bit_error_rate = grain_prov[0];
 
 #elif GRAIN_COUNT == 4
-	if (GAX(0) + GAX(1) + GAX(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPX(1) * GPX(2) * GPX(3);  //  0
-	if (GAO(0) + GAX(1) + GAX(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPX(1) * GPX(2) * GPX(1);  //  1
-	if (GAX(0) + GAO(1) + GAX(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPO(1) * GPX(2) * GPX(1);  //  2
-	if (GAO(0) + GAO(1) + GAX(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPO(1) * GPX(2) * GPX(1);  //  3
-	if (GAX(0) + GAX(1) + GAX(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPX(1) * GPX(2) * GPX(1);  //  4
-	if (GAO(0) + GAX(1) + GAO(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPX(1) * GPO(2) * GPX(1);  //  5
-	if (GAX(0) + GAO(1) + GAO(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPO(1) * GPO(2) * GPX(1);  //  6
-	if (GAO(0) + GAO(1) + GAO(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPO(1) * GPO(2) * GPX(1);  //  7
-	if (GAX(0) + GAX(1) + GAO(2) + GAX(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPX(1) * GPO(2) * GPX(1);  //  8
-	if (GAO(0) + GAX(1) + GAX(2) + GAO(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPX(1) * GPX(2) * GPO(1);  //  9
-	if (GAX(0) + GAO(1) + GAX(2) + GAO(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPO(1) * GPX(2) * GPO(1);  // 10
-	if (GAO(0) + GAO(1) + GAX(2) + GAO(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPO(1) * GPX(2) * GPO(1);  // 11
-	if (GAX(0) + GAX(1) + GAO(2) + GAO(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPX(1) * GPO(2) * GPO(1);  // 12
-	if (GAO(0) + GAX(1) + GAO(2) + GAO(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPX(1) * GPO(2) * GPO(1);  // 13
-	if (GAX(0) + GAO(1) + GAO(2) + GAO(3) < READABLE_THRETH) bit_error_rate += GPX(0) * GPO(1) * GPO(2) * GPO(1);  // 14
-	if (GAO(0) + GAO(1) + GAO(2) + GAO(3) < READABLE_THRETH) bit_error_rate += GPO(0) * GPO(1) * GPO(2) * GPO(1);  // 15
+	if (GA_(0) + GA_(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GP_(1) * GP_(2) * GP_(3);  //  0
+	if (GAM(0) + GA_(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GP_(1) * GP_(2) * GP_(3); //  1
+	if (GA_(0) + GAM(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GPM(1) * GP_(2) * GP_(3);  //  2
+	if (GAM(0) + GAM(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GPM(1) * GP_(2) * GP_(3);  //  3
+	if (GA_(0) + GA_(1) + GAM(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GP_(1) * GPM(2) * GP_(3);  //  4
+	if (GAM(0) + GA_(1) + GAM(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GP_(1) * GPM(2) * GP_(3);  //  5
+	if (GA_(0) + GAM(1) + GAM(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GPM(1) * GPM(2) * GP_(3);  //  6
+	if (GAM(0) + GAM(1) + GAM(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GPM(1) * GPM(2) * GP_(3);  //  7
+	if (GA_(0) + GA_(1) + GA_(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GP_(1) * GP_(2) * GPM(3);  //  8
+	if (GAM(0) + GA_(1) + GA_(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GP_(1) * GP_(2) * GPM(3);  //  9
+	if (GA_(0) + GAM(1) + GA_(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GPM(1) * GP_(2) * GPM(3);  // 10
+	if (GAM(0) + GAM(1) + GA_(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GPM(1) * GP_(2) * GPM(3);  // 11
+	if (GA_(0) + GA_(1) + GAM(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GP_(1) * GPM(2) * GPM(3);  // 12
+	if (GAM(0) + GA_(1) + GAM(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GP_(1) * GPM(2) * GPM(3);  // 13
+	if (GA_(0) + GAM(1) + GAM(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GPM(1) * GPM(2) * GPM(3);  // 14
+	if (GAM(0) + GAM(1) + GAM(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GPM(1) * GPM(2) * GPM(3);  // 15
 #else
 #error Not implement for this GRAIN_COUNT pattern
 #endif
-	/*
-	#undef GAX(n)
-	#undef GAO(n)
-	#undef GPX(n)
-	#undef GPO(n)
-	*/
+	
+#undef GA_
+#undef GAM
+#undef GP_
+#undef GPM
+	
 
 	return bit_error_rate;
 }
 
 __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list_count, double hw)
 {
+
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_prov[GRAIN_COUNT];			// グレインの逆方向に向いている確率
-	double grain_tcs[GRAIN_COUNT];			// グレインごとのTc
-	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
-	double grain_area[GRAIN_COUNT];			// グレインごとの面積
+	double grain_prov[GRAIN_COUNT];				// グレインの逆方向に向いている確率
+	double grain_tc[GRAIN_COUNT];				// グレインごとのTc
+	double grain_cu[GRAIN_COUNT];				// グレインごとのCu組成
+	double grain_area[GRAIN_COUNT];				// グレインごとの面積
 	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
 	double grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
 	double grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
@@ -435,13 +448,14 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tcs[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD + TEMP_CURIE_MEAN;
-		grain_cu[i] = calcCuFromCurie(grain_tcs[i]);
+		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
-		grain_prov[i] = 1;
+		grain_prov[i] = INITIAL_MAG_PROV;
 	}
+
 
 	for (int i = -attempt_offset; i < ber_list_count; i++)
 	{
@@ -455,10 +469,10 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 		for (int k = 0; k < GRAIN_COUNT; k++)
 		{
 
-			if (temp > grain_tcs[k]) continue;
+			if (temp > grain_tc[k]) continue;
 
 			double kbm, kbp;
-			calcKb(temp, hw, grain_cu[k], kbp, kbm);
+			calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
 
 			double prov_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
 			double prov_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
@@ -504,9 +518,10 @@ void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double h
 
 __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_be_list, double hw)
 {
+
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
 	double grain_prov[GRAIN_COUNT];			// グレインの逆方向に向いている確率
-	double grain_tcs[GRAIN_COUNT];			// グレインごとのTc
+	double grain_tc[GRAIN_COUNT];			// グレインごとのTc
 	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
 	double grain_area[GRAIN_COUNT];			// グレインごとの面積
 	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
@@ -517,17 +532,19 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 	const int last_attempt = hw_switch_ap * 2 + attempt_offset;
 
 
-
 	curandStateMRG32k3a rand_stat;			// 乱数ステータス	
 	curand_init(kRandomSeed, thread_number, last_attempt * GRAIN_COUNT, &rand_stat);
 
 
+
+
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tcs[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD + TEMP_CURIE_MEAN;
-		grain_cu[i] = calcCuFromCurie(grain_tcs[i]);
+		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
+		grain_prov[i] = INITIAL_MAG_PROV;
 		//grain_ku_kum[i] = 1;
 	}
 	mid_be_list[thread_number] = 0;
@@ -535,7 +552,6 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 
 	for (int i = -attempt_offset; i < last_attempt; i++)
 	{
-		double signal_power = 0;
 
 		double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
 		if (temp < TEMP_AMBIENT)
@@ -545,21 +561,22 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 
 		for (int k = 0; k < GRAIN_COUNT; k++)
 		{
-			if (temp > grain_tcs[k]) continue;
+			if (temp > grain_tc[k]) continue;
 
 			double kbm, kbp;
-			calcKb(temp, hw, grain_cu[k], kbp, kbm);
+			calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
 
-			double prov_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
-			double prov_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
+			double prov_neg = 0 < i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
+			double prov_pog = 0 < i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
 			grain_prov[k] = prov_neg * (1 - grain_prov[k]) + (1 - prov_pog) * grain_prov[k];
 		}
 
-		if (i == hw_switch_ap - 1 && READABLE_THRETH > signal_power)
-			mid_be_list[thread_number] = calcPattern(grain_area, grain_prov);;
-		if (i == last_attempt - 1 && READABLE_THRETH > signal_power)
-			last_be_list[thread_number] = calcPattern(grain_area, grain_prov);;
+		if (i == hw_switch_ap - 1) // EAW用に中抜き
+			mid_be_list[thread_number] = calcPattern(grain_area, grain_prov);
+			
 	}
+
+	last_be_list[thread_number] = calcPattern(grain_area, grain_prov);
 
 }
 
@@ -570,6 +587,7 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	double *last_be_list = (double*)malloc(sizeof(double) * list_size);
 	double *dev_mid_be_list = NULL;
 	double *dev_last_be_list = NULL;
+	unsigned long long int random_seed = (unsigned long long int)(time(NULL));
 
 	cudaSetDevice(CUDA_DEVICE_NUM);
 	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_mid_be_list, sizeof(double) * list_size));
@@ -577,6 +595,7 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 
 	CUDA_SAFE_CALL(cudaMemcpy(dev_mid_be_list, mid_be_list, sizeof(double) * list_size, cudaMemcpyHostToDevice));
 	CUDA_SAFE_CALL(cudaMemcpy(dev_last_be_list, last_be_list, sizeof(double) * list_size, cudaMemcpyHostToDevice));
+	//CUDA_SAFE_CALL(cudaMemcpyToSymbol(&kRandomSeed, &random_seed, sizeof(unsigned long long int)));
 
 	calcMidLastBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_mid_be_list, dev_last_be_list, hw);
 	CUDA_SAFE_CALL(cudaGetLastError());
@@ -584,12 +603,29 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	CUDA_SAFE_CALL(cudaMemcpy(mid_be_list, dev_mid_be_list, sizeof(double) * list_size, cudaMemcpyDeviceToHost));
 	CUDA_SAFE_CALL(cudaMemcpy(last_be_list, dev_last_be_list, sizeof(double) * list_size, cudaMemcpyDeviceToHost));
 
+	
 	double temp_mid_bER = 0;
 	double temp_last_bER = 0;
 
+	/*
 
+	// ニコイチリダクション、高精度？
+	double half = list_size / 2;
+	for (int i = 0; i < log2(list_size)-1; i++)
+	{
+		for (int k = 0; k < half-1; k++)
+		{
+			mid_be_list[k] = (mid_be_list[2 * k] + mid_be_list[2 * k + 1]) / 2.0;
+			last_be_list[k] = (last_be_list[2 * k] + last_be_list[2 * k + 1]) / 2.0;
+		}
+		half /= 2.0;
+	}
 
+	temp_mid_bER = mid_be_list[0];
+	temp_last_bER = last_be_list[0];
+	*/
 
+	
 	
 	for (int i = 0; i < list_size; i++)
 	{
@@ -599,6 +635,19 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 
 	temp_mid_bER /= list_size;
 	temp_last_bER /= list_size;
+	
+	
+	/*
+	// thrust GPUリダクション
+	thrust::device_ptr<double> dev_mid_be_ptr(dev_mid_be_list);
+	thrust::device_ptr<double> dev_last_be_ptr(dev_last_be_list);
+
+	temp_mid_bER = thrust::reduce(dev_mid_be_ptr, dev_mid_be_ptr + list_size);
+	temp_last_bER = thrust::reduce(dev_last_be_ptr, dev_last_be_ptr + list_size);
+	temp_mid_bER /= list_size;
+	temp_last_bER /= list_size;
+	*/
+	
 
 	*mid_bER = temp_mid_bER;
 	*last_bER = temp_last_bER;
@@ -657,11 +706,22 @@ int main()
 	}
 	*/
 
-	system("time /t");
-	FILE *fp = fopen("hw_list.txt", "w");
+	auto start = std::chrono::system_clock::now();
+#if (BER_ALGORITHM == 1)
+
+	FILE *fp = fopen("hw_list_prov.txt", "w");
+#else
+	FILE *fp = fopen("hw_list_pure.txt", "w");
+
+#endif
 	calcHwList(fp);
 	fclose(fp);
-	system("time /t");
+
+	auto end = std::chrono::system_clock::now();
+	auto dur = end - start;
+	auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
+
+	std::cout <<"\n"<< msec << " milli sec \n";
 
 	system("pause");
     return 0;
