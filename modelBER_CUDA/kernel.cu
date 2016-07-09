@@ -114,8 +114,6 @@ __device__ double calcKb(double temp, double hw, double cu)
 
 __device__ void calcKb(double temp, double hw, double cu, double tc, double &kbp, double &kbm)
 {
-
-
 	kbm = kbp = 0;
 	if (tc <= temp) return;
 
@@ -392,14 +390,14 @@ __device__ inline double calcPattern(double *grain_area, double *grain_prov)
 #define GA_(n) (0)
 #define GAM(n) (grain_area[n])
 #define GP_(n) (grain_prov[n])
-#define GPM(n) (1 - grain_area[n])
+#define GPM(n) (1 - grain_prov[n])
 
 #if GRAIN_COUNT == 1
 	if (grain_area[0] < READABLE_THRETH) bit_error_rate = grain_prov[0];
 
 #elif GRAIN_COUNT == 4
 	if (GA_(0) + GA_(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GP_(1) * GP_(2) * GP_(3);  //  0
-	if (GAM(0) + GA_(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GP_(1) * GP_(2) * GP_(3); //  1
+	if (GAM(0) + GA_(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GP_(1) * GP_(2) * GP_(3);  //  1
 	if (GA_(0) + GAM(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GPM(1) * GP_(2) * GP_(3);  //  2
 	if (GAM(0) + GAM(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GPM(1) * GP_(2) * GP_(3);  //  3
 	if (GA_(0) + GA_(1) + GAM(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GP_(1) * GPM(2) * GP_(3);  //  4
@@ -416,6 +414,8 @@ __device__ inline double calcPattern(double *grain_area, double *grain_prov)
 	if (GAM(0) + GAM(1) + GAM(2) + GAM(3) < READABLE_THRETH) bit_error_rate += GPM(0) * GPM(1) * GPM(2) * GPM(3);  // 15
 #else
 #error Not implement for this GRAIN_COUNT pattern
+
+
 #endif
 	
 #undef GA_
@@ -557,17 +557,17 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 		if (temp < TEMP_AMBIENT)
 			temp = TEMP_AMBIENT;
 
-
-
 		for (int k = 0; k < GRAIN_COUNT; k++)
 		{
 			if (temp > grain_tc[k]) continue;
 
 			double kbm, kbp;
-			calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
+			//calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
+			kbp = calcKb(temp, hw, grain_cu[k]);
+			kbm = calcKb(temp, -hw, grain_cu[k]);
 
-			double prov_neg = 0 < i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
-			double prov_pog = 0 < i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
+			double prov_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
+			double prov_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
 			grain_prov[k] = prov_neg * (1 - grain_prov[k]) + (1 - prov_pog) * grain_prov[k];
 		}
 
@@ -607,9 +607,7 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	double temp_mid_bER = 0;
 	double temp_last_bER = 0;
 
-	/*
-
-	// ニコイチリダクション、高精度？
+	/*// ニコイチリダクション、高精度？
 	double half = list_size / 2;
 	for (int i = 0; i < log2(list_size)-1; i++)
 	{
@@ -625,8 +623,7 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	temp_last_bER = last_be_list[0];
 	*/
 
-	
-	
+	/*
 	for (int i = 0; i < list_size; i++)
 	{
 		temp_mid_bER += mid_be_list[i];
@@ -635,9 +632,9 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 
 	temp_mid_bER /= list_size;
 	temp_last_bER /= list_size;
+	*/
+
 	
-	
-	/*
 	// thrust GPUリダクション
 	thrust::device_ptr<double> dev_mid_be_ptr(dev_mid_be_list);
 	thrust::device_ptr<double> dev_last_be_ptr(dev_last_be_list);
@@ -646,7 +643,7 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	temp_last_bER = thrust::reduce(dev_last_be_ptr, dev_last_be_ptr + list_size);
 	temp_mid_bER /= list_size;
 	temp_last_bER /= list_size;
-	*/
+	
 	
 
 	*mid_bER = temp_mid_bER;
@@ -675,9 +672,6 @@ void calcHwList(FILE *fp)
 	}
 
 }
-
-
-
 
 #endif
 
