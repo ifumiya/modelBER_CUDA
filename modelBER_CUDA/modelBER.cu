@@ -384,16 +384,16 @@ void calcHwList(FILE *fp)
 #########################################################################################################################
 */
 
-__device__ inline double calcPattern(double *grain_area, double *grain_prov)
+__device__ inline double calcPattern(double *grain_area, double *grain_prob)
 {
 	double bit_error_rate = 0;
 #define GA_(n) (0)
 #define GAM(n) (grain_area[n])
-#define GP_(n) (grain_prov[n])
-#define GPM(n) (1 - grain_prov[n])
+#define GP_(n) (grain_prob[n])
+#define GPM(n) (1 - grain_prob[n])
 
 #if GRAIN_COUNT == 1
-	if (grain_area[0] < READABLE_THRETH) bit_error_rate = grain_prov[0];
+	if (grain_area[0] < READABLE_THRETH) bit_error_rate = grain_prob[0];
 
 #elif GRAIN_COUNT == 4
 	if (GA_(0) + GA_(1) + GA_(2) + GA_(3) < READABLE_THRETH) bit_error_rate += GP_(0) * GP_(1) * GP_(2) * GP_(3);  //  0
@@ -431,7 +431,7 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 {
 
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_prov[GRAIN_COUNT];				// グレインの逆方向に向いている確率
+	double grain_prob[GRAIN_COUNT];				// グレインの逆方向に向いている確率
 	double grain_tc[GRAIN_COUNT];				// グレインごとのTc
 	double grain_cu[GRAIN_COUNT];				// グレインごとのCu組成
 	double grain_area[GRAIN_COUNT];				// グレインごとの面積
@@ -453,7 +453,7 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
-		grain_prov[i] = INITIAL_MAG_PROV;
+		grain_prob[i] = INITIAL_MAG_prob;
 	}
 
 
@@ -474,14 +474,14 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 			double kbm, kbp;
 			calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
 
-			double prov_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
-			double prov_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
-			grain_prov[k] = prov_neg * (1 - grain_prov[k]) + (1 - prov_pog) * grain_prov[k];
+			double prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
+			double prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
+			grain_prob[k] = prob_neg * (1 - grain_prob[k]) + (1 - prob_pog) * grain_prob[k];
 		}
 
 
 
-		double ber = calcPattern(grain_area, grain_prov);
+		double ber = calcPattern(grain_area, grain_prob);
 		atomicAdd(&ber_list[i], ber);
 	}
 }
@@ -520,7 +520,7 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 {
 
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_prov[GRAIN_COUNT];			// グレインの逆方向に向いている確率
+	double grain_prob[GRAIN_COUNT];			// グレインの逆方向に向いている確率
 	double grain_tc[GRAIN_COUNT];			// グレインごとのTc
 	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
 	double grain_area[GRAIN_COUNT];			// グレインごとの面積
@@ -544,7 +544,7 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
-		grain_prov[i] = INITIAL_MAG_PROV;
+		grain_prob[i] = INITIAL_MAG_prob;
 		//grain_ku_kum[i] = 1;
 	}
 	mid_be_list[thread_number] = 0;
@@ -566,17 +566,17 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 			kbp = calcKb(temp, hw, grain_cu[k]);
 			kbm = calcKb(temp, -hw, grain_cu[k]);
 
-			double prov_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
-			double prov_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
-			grain_prov[k] = prov_neg * (1 - grain_prov[k]) + (1 - prov_pog) * grain_prov[k];
+			double prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
+			double prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
+			grain_prob[k] = prob_neg * (1 - grain_prob[k]) + (1 - prob_pog) * grain_prob[k];
 		}
 
 		if (i == hw_switch_ap - 1) // EAW用に中抜き
-			mid_be_list[thread_number] = calcPattern(grain_area, grain_prov);
+			mid_be_list[thread_number] = calcPattern(grain_area, grain_prob);
 			
 	}
 
-	last_be_list[thread_number] = calcPattern(grain_area, grain_prov);
+	last_be_list[thread_number] = calcPattern(grain_area, grain_prob);
 
 }
 
@@ -703,7 +703,7 @@ int main()
 	auto start = std::chrono::system_clock::now();
 #if (BER_ALGORITHM == 1)
 
-	FILE *fp = fopen("hw_list_prov.txt", "w");
+	FILE *fp = fopen("hw_list_prob.txt", "w");
 #else
 	FILE *fp = fopen("hw_list_pure.txt", "w");
 
