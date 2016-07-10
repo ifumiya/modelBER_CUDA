@@ -5,6 +5,7 @@
 #include <device_atomic_functions.h>
 #include <curand.h>
 #include <curand_kernel.h>
+#include <cuda_profiler_api.h>
 #include <vector_functions.h>
 #include <thrust/reduce.h>
 #include <thrust/device_vector.h>
@@ -62,10 +63,22 @@ __device__ inline double calcCuFromCurie(double temp_curie)
 	return -temp_curie * (3 * K_B) / (2 * J_FE_FE * 4 * (G_FE - 1) *(G_FE - 1) * S_FE * (S_FE + 1)) + 1;
 }
 
+__device__ inline double convertTempFromAP(int ap_count)
+{
+	//return fmax(TEMP_AMBIENT, TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count);
+	double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count;
+	if (temp < TEMP_AMBIENT)
+		return TEMP_AMBIENT;
+	else
+		return temp;
+}
+
+
 __device__ inline double calcBrillouin(double s, double x)
 {
-	double o1 = (2 * s + 1) / (2 * s);
-	double o2 = 1 / (2 * s);
+
+	double o2 = 1 / (2 * S_FE);
+	double o1 = (2 * S_FE + 1) * o2;
 	return o1 / tanh(o1 * x) - o2 / tanh(o2 * x);
 }
 
@@ -74,19 +87,17 @@ __device__ double calc_sFe_Mean(double temp, double cu)
 	double vl = S_FE_MEAN_ERROR;
 	double vr = S_FE_MEAN_MAX;
 	double v;
-
 	double dxdv = (S_FE * 2 * J_FE_FE * 4 * (1 - cu) * (G_FE - 1)*(G_FE - 1)) / (K_B * temp);
 	do
 	{
 		v = (vl + vr) / 2.0;
-		double x = dxdv * v;
-		double f = v - S_FE * calcBrillouin(S_FE, x);
-
+		double br = S_FE *(2 * S_FE + 1) / (2 * S_FE) / tanh((2 * S_FE + 1) / (2 * S_FE) * dxdv * v) - S_FE  / (2 * S_FE) / tanh(1 / (2 * S_FE) * dxdv * v);
+		double f = v - br;
+		//double f = v - S_FE * calcBrillouin(S_FE, dxdv * v);
 		if (f < 0)
 			vl = v;
 		else
 			vr = v;
-
 
 	} while (fabs((vl - vr) / v) > S_FE_MEAN_ERROR);
 
@@ -134,9 +145,7 @@ void calcKbListKernel(double *kb_list, int kb_list_size, double hw)
 	double cu = calcCuFromCurie(TEMP_CURIE_MEAN);
 	for (int i = 0; i < kb_list_size; i++)
 	{
-		double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
-		if (temp < TEMP_AMBIENT)
-			temp = TEMP_AMBIENT;
+		double temp = convertTempFromAP(i);
 
 		kb_list[i] = calcKb(temp, hw, cu);
 	}
@@ -144,14 +153,15 @@ void calcKbListKernel(double *kb_list, int kb_list_size, double hw)
 }
 
 
+
+
 #if BER_ALGORITHM == 0
 
-/*
-###
-###  単純モンテカルロ法
-###
-#########################################################################################################################
-*/
+
+// ###
+// ###  単純モンテカルロ法
+// ###
+// #########################################################################################################################
 
 
 __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count, double hw)
@@ -187,10 +197,7 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 	{
 		double signal_power = 0;
 
-		double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
-		if (temp < TEMP_AMBIENT)
-			temp = TEMP_AMBIENT;
-
+		double temp = convertTempFromAP(i);
 
 		if (i == 0 || i == hw_switch_ap)
 			signed_hw = -signed_hw;
@@ -226,26 +233,23 @@ void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double h
 	for (int i = 0; i < bER_list_count; i++)
 		be_list[i] = 0;
 
-	cudaSetDevice(CUDA_DEVICE_NUM);
-	cudaMalloc((void**)&dev_be_list, sizeof(int) * bER_list_count);
-	cudaMemcpy(dev_be_list, be_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice);
-
-	cudaMemcpy(&kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice);
+	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
+	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_be_list, sizeof(int) * bER_list_count));
+	CUDA_SAFE_CALL(cudaMemcpy(dev_be_list, be_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpy(&kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
 
 	calcContinusBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_be_list, bER_list_count, hw);
+	CUDA_SAFE_CALL(cudaGetLastError());
+	CUDA_SAFE_CALL(cudaDeviceSynchronize());
 
-	auto err = cudaGetLastError();
-
-
-	cudaDeviceSynchronize();
-	cudaMemcpy(be_list, dev_be_list, sizeof(int) * bER_list_count, cudaMemcpyDeviceToHost);
+	CUDA_SAFE_CALL(cudaMemcpy(be_list, dev_be_list, sizeof(int) * bER_list_count, cudaMemcpyDeviceToHost));
 
 	for (int i = 0; i < bER_list_count; i++)
 	{
 		bER_list[i] = (double)be_list[i] / BIT_COUNT;
 	}
-	cudaFree(dev_be_list);
+	CUDA_SAFE_CALL(cudaFree(dev_be_list));
 	free(be_list);
 }
 
@@ -286,14 +290,10 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 	{
 		double signal_power = 0;
 
-		double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
-		if (temp < TEMP_AMBIENT)
-			temp = TEMP_AMBIENT;
-
+		double temp = convertTempFromAP(i);
 
 		if (i == 0 || i == hw_switch_ap)
 			signed_hw = -signed_hw;
-
 
 		for (int k = 0; k < GRAIN_COUNT; k++)
 		{
@@ -327,17 +327,19 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	int *dev_mid_be_list = NULL;
 	int *dev_last_be_list = NULL;
 
-	cudaSetDevice(CUDA_DEVICE_NUM);
-	cudaMalloc((void**)&dev_mid_be_list, sizeof(int) * list_size);
-	cudaMalloc((void**)&dev_last_be_list, sizeof(int) * list_size);
+	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
+	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_mid_be_list, sizeof(int) * list_size));
+	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_last_be_list, sizeof(int) * list_size));
 
-	cudaMemcpy(dev_mid_be_list, mid_be_list, sizeof(int) * list_size, cudaMemcpyHostToDevice);
-	cudaMemcpy(dev_last_be_list, last_be_list, sizeof(int) * list_size, cudaMemcpyHostToDevice);
+	CUDA_SAFE_CALL(cudaMemcpy(dev_mid_be_list, mid_be_list, sizeof(int) * list_size, cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpy(dev_last_be_list, last_be_list, sizeof(int) * list_size, cudaMemcpyHostToDevice));
 
 	calcMidLastBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_mid_be_list, dev_last_be_list, hw);
-	cudaDeviceSynchronize();
-	cudaMemcpy(mid_be_list, dev_mid_be_list, sizeof(int) * list_size, cudaMemcpyDeviceToHost);
-	cudaMemcpy(last_be_list, dev_last_be_list, sizeof(int) * list_size, cudaMemcpyDeviceToHost);
+	CUDA_SAFE_CALL(cudaGetLastError());
+	CUDA_SAFE_CALL(cudaDeviceSynchronize());
+
+	CUDA_SAFE_CALL(cudaMemcpy(mid_be_list, dev_mid_be_list, sizeof(int) * list_size, cudaMemcpyDeviceToHost));
+	CUDA_SAFE_CALL(cudaMemcpy(last_be_list, dev_last_be_list, sizeof(int) * list_size, cudaMemcpyDeviceToHost));
 
 	double temp_mid_bER = 0;
 	double temp_last_bER = 0;
@@ -352,37 +354,21 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	*mid_bER = temp_mid_bER;
 	*last_bER = temp_last_bER;
 
-	cudaFree(dev_mid_be_list);
-	cudaFree(dev_last_be_list);
+	CUDA_SAFE_CALL(cudaFree(dev_mid_be_list));
+	CUDA_SAFE_CALL(cudaFree(dev_last_be_list));
 	free(mid_be_list);
 	free(last_be_list);
 
 }
 
-void calcHwList(FILE *fp)
-{
-	fprintf(fp, "Hw[kOe]\tbER\tbER(WE)\tbER(EAW)\n");
-	for (int i = 0; i < HW_LIST_SIZE; i++)
-	{
-		printf("%d / %d \r", i, HW_LIST_SIZE);
 
-		double hw = HW_MAX * i / HW_LIST_SIZE;
-		double mid_bER = 0;
-		double last_bER = 0;
-		calcMidLastBitErrorRateHost(&mid_bER, &last_bER, hw);
-
-		fprintf(fp, "%f\t%.10e\t%.10e\t%.10e\n", hw * 1e-3, last_bER, mid_bER, last_bER - mid_bER);
-	}
-
-}
 
 #else
-/*
-###
-###  確率　・　パターン法
-###
-#########################################################################################################################
-*/
+
+// ###
+// ###  確率　・　パターン法
+// ###
+// #########################################################################################################################
 
 __device__ inline double calcPattern(double *grain_area, double *grain_prob)
 {
@@ -453,7 +439,7 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
-		grain_prob[i] = INITIAL_MAG_prob;
+		grain_prob[i] = INITIAL_MAG_PROB;
 	}
 
 
@@ -494,26 +480,25 @@ void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double h
 	for (int i = 0; i < bER_list_count; i++)
 		bER_list[i] = 0;
 
-	cudaSetDevice(CUDA_DEVICE_NUM);
-	cudaMalloc((void**)&dev_ber_list, sizeof(int) * bER_list_count);
-	cudaMemcpy(dev_ber_list, bER_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice);
+	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
+	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_ber_list, sizeof(int) * bER_list_count));
+	CUDA_SAFE_CALL(cudaMemcpy(dev_ber_list, bER_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice));
 
-	cudaMemcpy(&kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice);
+	//CUDA_SAFE_CALL(cudaMemcpy(&kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
+	
+	calcContinusBitErrorRateKernel <<< CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >>>(dev_ber_list, bER_list_count, hw);
+
+	CUDA_SAFE_CALL(cudaGetLastError());
 
 
-	calcContinusBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_ber_list, bER_list_count, hw);
-
-	auto err = cudaGetLastError();
-
-
-	cudaDeviceSynchronize();
-	cudaMemcpy(bER_list, dev_ber_list, sizeof(int) * bER_list_count, cudaMemcpyDeviceToHost);
+	CUDA_SAFE_CALL(cudaDeviceSynchronize());
+	CUDA_SAFE_CALL(cudaMemcpy(bER_list, dev_ber_list, sizeof(int) * bER_list_count, cudaMemcpyDeviceToHost));
 
 	for (int i = 0; i < bER_list_count; i++)
 	{
 		bER_list[i] = bER_list[i] / BIT_COUNT;
 	}
-	cudaFree(dev_ber_list);
+	CUDA_SAFE_CALL(cudaFree(dev_ber_list));
 }
 
 __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_be_list, double hw)
@@ -535,16 +520,13 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 	curandStateMRG32k3a rand_stat;			// 乱数ステータス	
 	curand_init(kRandomSeed, thread_number, last_attempt * GRAIN_COUNT, &rand_stat);
 
-
-
-
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
 		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
 		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
-		grain_prob[i] = INITIAL_MAG_prob;
+		grain_prob[i] = INITIAL_MAG_PROB;
 		//grain_ku_kum[i] = 1;
 	}
 	mid_be_list[thread_number] = 0;
@@ -562,9 +544,9 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 			if (temp > grain_tc[k]) continue;
 
 			double kbm, kbp;
-			//calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
-			kbp = calcKb(temp, hw, grain_cu[k]);
-			kbm = calcKb(temp, -hw, grain_cu[k]);
+			calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
+			//kbp = calcKb(temp, hw, grain_cu[k]);
+			//kbm = calcKb(temp, -hw, grain_cu[k]);
 
 			double prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
 			double prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
@@ -589,7 +571,7 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	double *dev_last_be_list = NULL;
 	unsigned long long int random_seed = (unsigned long long int)(time(NULL));
 
-	cudaSetDevice(CUDA_DEVICE_NUM);
+	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
 	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_mid_be_list, sizeof(double) * list_size));
 	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_last_be_list, sizeof(double) * list_size));
 
@@ -597,7 +579,8 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	CUDA_SAFE_CALL(cudaMemcpy(dev_last_be_list, last_be_list, sizeof(double) * list_size, cudaMemcpyHostToDevice));
 	//CUDA_SAFE_CALL(cudaMemcpyToSymbol(&kRandomSeed, &random_seed, sizeof(unsigned long long int)));
 
-	calcMidLastBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_mid_be_list, dev_last_be_list, hw);
+
+	calcMidLastBitErrorRateKernel <<<CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT>>>(dev_mid_be_list, dev_last_be_list, hw);
 	CUDA_SAFE_CALL(cudaGetLastError());
 	CUDA_SAFE_CALL(cudaDeviceSynchronize());
 	CUDA_SAFE_CALL(cudaMemcpy(mid_be_list, dev_mid_be_list, sizeof(double) * list_size, cudaMemcpyDeviceToHost));
@@ -623,7 +606,9 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	temp_last_bER = last_be_list[0];
 	*/
 
-	/*
+
+	
+	// 単純リダクション
 	for (int i = 0; i < list_size; i++)
 	{
 		temp_mid_bER += mid_be_list[i];
@@ -632,9 +617,10 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 
 	temp_mid_bER /= list_size;
 	temp_last_bER /= list_size;
-	*/
-
 	
+	
+
+	/*
 	// thrust GPUリダクション
 	thrust::device_ptr<double> dev_mid_be_ptr(dev_mid_be_list);
 	thrust::device_ptr<double> dev_last_be_ptr(dev_last_be_list);
@@ -643,20 +629,23 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	temp_last_bER = thrust::reduce(dev_last_be_ptr, dev_last_be_ptr + list_size);
 	temp_mid_bER /= list_size;
 	temp_last_bER /= list_size;
-	
-	
+	*/
 
 	*mid_bER = temp_mid_bER;
 	*last_bER = temp_last_bER;
 
-	cudaFree(dev_mid_be_list);
-	cudaFree(dev_last_be_list);
+	CUDA_SAFE_CALL(cudaFree(dev_mid_be_list));
+	CUDA_SAFE_CALL(cudaFree(dev_last_be_list));
 	free(mid_be_list);
 	free(last_be_list);
 
 }
 
-void calcHwList(FILE *fp)
+#endif
+
+
+
+void makeHwBerList(FILE *fp)
 {
 	fprintf(fp, "Hw[kOe]\tbER\tbER(WE)\tbER(EAW)\n");
 	for (int i = 0; i < HW_LIST_SIZE; i++)
@@ -670,10 +659,13 @@ void calcHwList(FILE *fp)
 
 		fprintf(fp, "%f\t%.10e\t%.10e\t%.10e\n", hw * 1e-3, last_bER, mid_bER, last_bER - mid_bER);
 	}
-
 }
 
-#endif
+void makeContinusBerList(FILE *fp)
+{
+	fprintf(stderr, "not implement at line %d", __LINE__);
+	exit(2);
+}
 
 
 int main()
@@ -700,6 +692,8 @@ int main()
 	}
 	*/
 
+
+
 	auto start = std::chrono::system_clock::now();
 #if (BER_ALGORITHM == 1)
 
@@ -708,15 +702,21 @@ int main()
 	FILE *fp = fopen("hw_list_pure.txt", "w");
 
 #endif
-	calcHwList(fp);
+	makeHwBerList(fp);
 	fclose(fp);
 
+
+	cudaProfilerStart();
 	auto end = std::chrono::system_clock::now();
 	auto dur = end - start;
 	auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
 
 	std::cout <<"\n"<< msec << " milli sec \n";
 
-	system("pause");
+
+
+	cudaProfilerStop();
+	
+	//system("pause");
     return 0;
 }
