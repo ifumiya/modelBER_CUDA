@@ -67,11 +67,8 @@ __device__ inline float calcCuFromCurie(float temp_curie)
 __host__ __device__ inline float convertTempFromAP(int ap_count)
 {
 	//return fmax(TEMP_AMBIENT, TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count);
-	float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count;
-	if (temp < TEMP_AMBIENT)
-		return TEMP_AMBIENT;
-	else
-		return temp;
+	float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9F * ap_count;
+	return temp < TEMP_AMBIENT ? TEMP_AMBIENT : temp;
 }
 
 
@@ -524,9 +521,9 @@ __global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_tc[i] = curand_normal(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
-		float a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
+		float a = curand_log_normal(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		grain_prob[i] = INITIAL_MAG_PROB;
 		//grain_ku_kum[i] = 1;
