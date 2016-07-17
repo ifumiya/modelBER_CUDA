@@ -51,22 +51,23 @@ __device__ double atomicAdd(double* address, double val)
 	return __longlong_as_double(old);
 }
 
+
 #endif
 
-__device__ inline double calcCurieFromCu(double cu)
+__device__ inline float calcCurieFromCu(float cu)
 {
 	return (2 * J_FE_FE * 4 * (1 - cu) * (G_FE - 1)  * (G_FE - 1) * S_FE * (S_FE + 1)) / (3 * K_B);
 }
 
-__device__ inline double calcCuFromCurie(double temp_curie)
+__device__ inline float calcCuFromCurie(float temp_curie)
 {
 	return -temp_curie * (3 * K_B) / (2 * J_FE_FE * 4 * (G_FE - 1) *(G_FE - 1) * S_FE * (S_FE + 1)) + 1;
 }
 
-__host__ __device__ inline double convertTempFromAP(int ap_count)
+__host__ __device__ inline float convertTempFromAP(int ap_count)
 {
 	//return fmax(TEMP_AMBIENT, TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count);
-	double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count;
+	float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count;
 	if (temp < TEMP_AMBIENT)
 		return TEMP_AMBIENT;
 	else
@@ -74,78 +75,79 @@ __host__ __device__ inline double convertTempFromAP(int ap_count)
 }
 
 
-__device__ inline double calcBrillouin(double s, double x)
+__device__ inline float calcBrillouin(float s, float x)
 {
 
-	double o2 = 1 / (2 * S_FE);
-	double o1 = (2 * S_FE + 1) * o2;
+	float o2 = 1 / (2 * S_FE);
+	float o1 = (2 * S_FE + 1) * o2;
 	return o1 / tanh(o1 * x) - o2 / tanh(o2 * x);
+	
 }
 
-__device__ double calc_sFe_Mean(double temp, double cu)
+__device__ float calc_sFe_Mean(float temp, float cu)
 {
-	double vl = S_FE_MEAN_ERROR;
-	double vr = S_FE_MEAN_MAX;
-	double v;
-	double dxdv = (S_FE * 2 * J_FE_FE * 4 * (1 - cu) * (G_FE - 1)*(G_FE - 1)) / (K_B * temp);
+	float vl = S_FE_MEAN_ERROR;
+	float vr = S_FE_MEAN_MAX;
+	float v;
+	float dxdv = (S_FE * 2 * J_FE_FE * 4 * (1 - cu) * (G_FE - 1)*(G_FE - 1)) / (K_B * temp);
 	do
 	{
 		v = (vl + vr) / 2.0;
-		double br = S_FE *(2 * S_FE + 1) / (2 * S_FE) / tanh((2 * S_FE + 1) / (2 * S_FE) * dxdv * v) - S_FE  / (2 * S_FE) / tanh(1 / (2 * S_FE) * dxdv * v);
-		double f = v - br;
-		//double f = v - S_FE * calcBrillouin(S_FE, dxdv * v);
+		float br = S_FE *(2 * S_FE + 1) / (2 * S_FE) / tanh((2 * S_FE + 1) / (2 * S_FE) * dxdv * v) - S_FE  / (2 * S_FE) / tanh(1 / (2 * S_FE) * dxdv * v);
+		float f = v - br;
+		//float f = v - S_FE * calcBrillouin(S_FE, dxdv * v);
 		if (f < 0)
 			vl = v;
 		else
 			vr = v;
 
 	} while (fabs((vl - vr) / v) > S_FE_MEAN_ERROR);
-
+	
 	return v;
 }
 
-__device__ double calcKb(double temp, double hw, double cu)
+__device__ float calcKb(float temp, float hw, float cu)
 {
 
-	double temp_curie = calcCurieFromCu(cu);
+	float temp_curie = calcCurieFromCu(cu);
 	if (temp >= temp_curie) return 0;
 
-	double dFeFe = BULK_D_FE_FE * KU_KBULK;
+	float dFeFe = BULK_D_FE_FE * KU_KBULK;
 
-	double s = calc_sFe_Mean(temp, cu);
+	float s = calc_sFe_Mean(temp, cu);
 
-	double total_atom_number = 1 / ((FE  * (1 - cu) * V_FE) + ((1 - FE)*(1 - cu) * V_PT) + cu * V_CU);
-	double ku = total_atom_number * FE * (1 - cu)* (4 * (1 - cu))  * dFeFe  * s * s;
-	double hc = 2 * ((4 * (1 - cu))  * dFeFe  * s) / (M_B * G_FE);
+	float total_atom_number = 1 / ((FE  * (1 - cu) * V_FE) + ((1 - FE)*(1 - cu) * V_PT) + cu * V_CU);
+	float ku = total_atom_number * FE * (1 - cu)* (4 * (1 - cu))  * dFeFe  * s * s;
+	float hc = 2 * ((4 * (1 - cu))  * dFeFe  * s) / (M_B * G_FE);
 	if (hw < 0 && hc <= fabs(hw)) return 0;
 
-	double kb = (ku * GRAIN_VOLUME) / K_B / temp * (1 + hw / hc) * (1 + hw / hc);
+	float kb = (ku * GRAIN_VOLUME) / K_B / temp * (1 + hw / hc) * (1 + hw / hc);
 	return kb;
 }
 
-__device__ void calcKb(double temp, double hw, double cu, double tc, double &kbp, double &kbm)
+__device__ void calcKb(float temp, float hw, float cu, float tc, float &kbp, float &kbm)
 {
 	kbm = kbp = 0;
 	if (tc <= temp) return;
 
-	double dFeFe = BULK_D_FE_FE * KU_KBULK;
+	float dFeFe = BULK_D_FE_FE * KU_KBULK;
 
-	double s = calc_sFe_Mean(temp, cu);
+	float s = calc_sFe_Mean(temp, cu);
 
-	double total_atom_number = 1 / ((FE  * (1 - cu) * V_FE) + ((1 - FE)*(1 - cu) * V_PT) + cu * V_CU);
-	double ku = total_atom_number * FE * (1 - cu)* (4 * (1 - cu))  * dFeFe  * s * s;
-	double hc = 2 * ((4 * (1 - cu))  * dFeFe  * s) / (M_B * G_FE);
+	float total_atom_number = 1 / ((FE  * (1 - cu) * V_FE) + ((1 - FE)*(1 - cu) * V_PT) + cu * V_CU);
+	float ku = total_atom_number * FE * (1 - cu)* (4 * (1 - cu))  * dFeFe  * s * s;
+	float hc = 2 * ((4 * (1 - cu))  * dFeFe  * s) / (M_B * G_FE);
 	kbp = (ku * GRAIN_VOLUME) / K_B / temp * (1 + hw / hc) * (1 + hw / hc);
 	kbm = hc <= hw ? 0 : (ku * GRAIN_VOLUME) / K_B / temp * (1 - hw / hc) * (1 - hw / hc);
 }
 
 __global__
-void calcKbListKernel(double *kb_list, int kb_list_size, double hw)
+void calcKbListKernel(float *kb_list, int kb_list_size, float hw)
 {
-	double cu = calcCuFromCurie(TEMP_CURIE_MEAN);
+	float cu = calcCuFromCurie(TEMP_CURIE_MEAN);
 	for (int i = 0; i < kb_list_size; i++)
 	{
-		double temp = convertTempFromAP(i);
+		float temp = convertTempFromAP(i);
 
 		kb_list[i] = calcKb(temp, hw, cu);
 	}
@@ -164,16 +166,16 @@ void calcKbListKernel(double *kb_list, int kb_list_size, double hw)
 // #########################################################################################################################
 
 
-__global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count, double hw)
+__global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count, float hw)
 {
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_tc[GRAIN_COUNT];			// グレインごとのTc
-	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
-	double grain_area[GRAIN_COUNT];			// グレインごとの面積
-	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
+	float grain_tc[GRAIN_COUNT];			// グレインごとのTc
+	float grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
+	float grain_area[GRAIN_COUNT];			// グレインごとの面積
+	//float grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
 	int grain_dir[GRAIN_COUNT];				// グレインの磁化の向き (1 = 逆方向、-1 = 順方向)
-	double grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
-	double grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
+	float grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
+	float grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
 	const int hw_switch_ap = (int)(BIT_PITCH / LINER_VELOCITY *1.0e-9 * F0_AP);														  // 書込磁界順方向終了タイミング
 	const int attempt_offset = (int)(TEMP_CURIE_MEAN * TEMP_CURIE_SD * 2 / (THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9));	  // Tcm以前の予備シミュレーション
 
@@ -186,18 +188,18 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 	{
 		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
-		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
+		float a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
 		grain_dir[i] = 1;
 	}
 
-	double signed_hw = hw;
+	float signed_hw = hw;
 	for (int i = -attempt_offset; i < ber_list_count; i++)
 	{
-		double signal_power = 0;
+		float signal_power = 0;
 
-		double temp = convertTempFromAP(i);
+		float temp = convertTempFromAP(i);
 
 		if (i == 0 || i == hw_switch_ap)
 			signed_hw = -signed_hw;
@@ -211,8 +213,8 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 			// hw * grain_dir = -1 hw方向への反転確率
 			if (temp > grain_tc[k]) continue;
 
-			double rev_prob = exp(-calcKb(temp, signed_hw * grain_dir[k], grain_cu[k]) * grain_area[k]);
-			double dice = curand_uniform(&rand_stat);
+			float rev_prob = exp(-calcKb(temp, signed_hw * grain_dir[k], grain_cu[k]) * grain_area[k]);
+			float dice = curand_uniform(&rand_stat);
 			if (rev_prob > dice)
 				grain_dir[k] = -grain_dir[k];
 			if (grain_dir[k] < 0)
@@ -224,7 +226,7 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 	}
 }
 
-void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double hw)
+void calcContinusBitErrorRateHost(float *bER_list, int bER_list_count, float hw)
 {
 	int *dev_be_list;
 	int *be_list = (int*)malloc(sizeof(int) * bER_list_count);
@@ -247,22 +249,22 @@ void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double h
 
 	for (int i = 0; i < bER_list_count; i++)
 	{
-		bER_list[i] = (double)be_list[i] / BIT_COUNT;
+		bER_list[i] = (float)be_list[i] / BIT_COUNT;
 	}
 	CUDA_SAFE_CALL(cudaFree(dev_be_list));
 	free(be_list);
 }
 
-__global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_list, double hw)
+__global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_list, float hw)
 {
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_tc[GRAIN_COUNT];			// グレインごとのTc
-	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
-	double grain_area[GRAIN_COUNT];			// グレインごとの面積
-	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
+	float grain_tc[GRAIN_COUNT];			// グレインごとのTc
+	float grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
+	float grain_area[GRAIN_COUNT];			// グレインごとの面積
+	//float grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
 	int grain_dir[GRAIN_COUNT];				// グレインの磁化の向き (1 = 逆方向、-1 = 順方向)
-	double grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
-	double grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
+	float grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
+	float grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
 	const int hw_switch_ap = (int)(BIT_PITCH / LINER_VELOCITY *1.0e-9 * F0_AP);														  // 書込磁界順方向終了タイミング
 	const int attempt_offset = (int)(TEMP_CURIE_MEAN * TEMP_CURIE_SD * 2 / (THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9));	  // Tcm以前の予備シミュレーション
 	const int last_attempt = hw_switch_ap * 2 + attempt_offset;
@@ -277,7 +279,7 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 	{
 		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
-		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
+		float a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
 		grain_dir[i] = 1;
@@ -285,12 +287,12 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 	mid_be_list[thread_number] = 0;
 	last_be_list[thread_number] = 0;
 
-	double signed_hw = hw;
+	float signed_hw = hw;
 	for (int i = -attempt_offset; i < last_attempt; i++)
 	{
-		double signal_power = 0;
+		float signal_power = 0;
 
-		double temp = convertTempFromAP(i);
+		float temp = convertTempFromAP(i);
 
 		if (i == 0 || i == hw_switch_ap)
 			signed_hw = -signed_hw;
@@ -303,8 +305,8 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 			// hw * grain_dir = -1 hw方向への反転確率
 			if (temp > grain_tc[k]) continue;
 
-			double rev_prob = exp(-calcKb(temp, signed_hw * grain_dir[k], grain_cu[k]) * grain_area[k]);
-			double dice = curand_uniform(&rand_stat);
+			float rev_prob = exp(-calcKb(temp, signed_hw * grain_dir[k], grain_cu[k]) * grain_area[k]);
+			float dice = curand_uniform(&rand_stat);
 			if (rev_prob > dice)
 				grain_dir[k] = -grain_dir[k];
 			if (grain_dir[k] < 0)
@@ -319,7 +321,7 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 
 }
 
-void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
+void calcMidLastBitErrorRateHost(float *mid_bER, float *last_bER, float hw)
 {
 	const int list_size = BIT_COUNT;
 	int *mid_be_list = (int*)malloc(sizeof(int) * list_size);
@@ -341,8 +343,8 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 	CUDA_SAFE_CALL(cudaMemcpy(mid_be_list, dev_mid_be_list, sizeof(int) * list_size, cudaMemcpyDeviceToHost));
 	CUDA_SAFE_CALL(cudaMemcpy(last_be_list, dev_last_be_list, sizeof(int) * list_size, cudaMemcpyDeviceToHost));
 
-	double temp_mid_bER = 0;
-	double temp_last_bER = 0;
+	float temp_mid_bER = 0;
+	float temp_last_bER = 0;
 	for (int i = 0; i < list_size; i++)
 	{
 		temp_mid_bER += mid_be_list[i];
@@ -370,9 +372,9 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 // ###
 // #########################################################################################################################
 
-__device__ inline double calcPattern(double *grain_area, double *grain_prob)
+__device__ inline float calcPattern(float *grain_area, float *grain_prob)
 {
-	double bit_error_rate = 0;
+	float bit_error_rate = 0;
 #define GA_(n) (0)
 #define GAM(n) (grain_area[n])
 #define GP_(n) (grain_prob[n])
@@ -413,17 +415,17 @@ __device__ inline double calcPattern(double *grain_area, double *grain_prob)
 	return bit_error_rate;
 }
 
-__global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list_count, double hw)
+__global__ void calcContinusBitErrorRateKernel(float *ber_list, float ber_list_count, float hw)
 {
 
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_prob[GRAIN_COUNT];				// グレインの逆方向に向いている確率
-	double grain_tc[GRAIN_COUNT];				// グレインごとのTc
-	double grain_cu[GRAIN_COUNT];				// グレインごとのCu組成
-	double grain_area[GRAIN_COUNT];				// グレインごとの面積
-	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
-	double grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
-	double grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
+	float grain_prob[GRAIN_COUNT];				// グレインの逆方向に向いている確率
+	float grain_tc[GRAIN_COUNT];				// グレインごとのTc
+	float grain_cu[GRAIN_COUNT];				// グレインごとのCu組成
+	float grain_area[GRAIN_COUNT];				// グレインごとの面積
+	//float grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
+	float grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
+	float grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
 	const int hw_switch_ap = (int)(BIT_PITCH / LINER_VELOCITY *1.0e-9 * F0_AP);														  // 書込磁界順方向終了タイミング
 	const int attempt_offset = (int)(TEMP_CURIE_MEAN * TEMP_CURIE_SD * 2 / (THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9));	  // Tcm以前の予備シミュレーション
 
@@ -434,9 +436,9 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_tc[i] = curand_normal (&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
-		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
+		float a = curand_log_normal(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
 		grain_prob[i] = INITIAL_MAG_PROB;
@@ -446,7 +448,7 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 	for (int i = -attempt_offset; i < ber_list_count; i++)
 	{
 
-		double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
+		float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
 		if (temp < TEMP_AMBIENT)
 			temp = TEMP_AMBIENT;
 
@@ -457,24 +459,24 @@ __global__ void calcContinusBitErrorRateKernel(double *ber_list, double ber_list
 
 			if (temp > grain_tc[k]) continue;
 
-			double kbm, kbp;
+			float kbm, kbp;
 			calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
 
-			double prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
-			double prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
+			float prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
+			float prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
 			grain_prob[k] = prob_neg * (1 - grain_prob[k]) + (1 - prob_pog) * grain_prob[k];
 		}
 
 
 
-		double ber = calcPattern(grain_area, grain_prob);
+		float ber = calcPattern(grain_area, grain_prob);
 		atomicAdd(&ber_list[i], ber);
 	}
 }
 
-void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double hw)
+void calcContinusBitErrorRateHost(float *bER_list, int bER_list_count, float hw)
 {
-	double *dev_ber_list;
+	float *dev_ber_list;
 	unsigned long long int random_seed = (unsigned long long int)(time(NULL));
 
 	for (int i = 0; i < bER_list_count; i++)
@@ -501,17 +503,17 @@ void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double h
 	CUDA_SAFE_CALL(cudaFree(dev_ber_list));
 }
 
-__global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_be_list, double hw)
+__global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be_list, float hw)
 {
 
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	double grain_prob[GRAIN_COUNT];			// グレインの逆方向に向いている確率
-	double grain_tc[GRAIN_COUNT];			// グレインごとのTc
-	double grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
-	double grain_area[GRAIN_COUNT];			// グレインごとの面積
-	//double grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
-	double grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
-	double grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
+	float grain_prob[GRAIN_COUNT];			// グレインの逆方向に向いている確率
+	float grain_tc[GRAIN_COUNT];			// グレインごとのTc
+	float grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
+	float grain_area[GRAIN_COUNT];			// グレインごとの面積
+	//float grain_ku_kum[GRAIN_COUNT];			// グレインごとのKu/Kum
+	float grain_size_mu = log((GRAIN_MEAN * GRAIN_MEAN) / sqrt(GRAIN_SD * GRAIN_SD + GRAIN_MEAN * GRAIN_MEAN));  					  // グレインサイズ分散のμ
+	float grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
 	const int hw_switch_ap = (int)(BIT_PITCH / LINER_VELOCITY *1.0e-9 * F0_AP);														  // 書込磁界順方向終了タイミング
 	const int attempt_offset = (int)(TEMP_CURIE_MEAN * TEMP_CURIE_SD * 2 / (THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9));	  // Tcm以前の予備シミュレーション
 	const int last_attempt = hw_switch_ap * 2 + attempt_offset;
@@ -524,7 +526,7 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 	{
 		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
-		double a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
+		float a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		grain_prob[i] = INITIAL_MAG_PROB;
 		//grain_ku_kum[i] = 1;
@@ -535,7 +537,7 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 	for (int i = -attempt_offset; i < last_attempt; i++)
 	{
 
-		double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
+		float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
 		if (temp < TEMP_AMBIENT)
 			temp = TEMP_AMBIENT;
 
@@ -543,13 +545,13 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 		{
 			if (temp > grain_tc[k]) continue;
 
-			double kbm, kbp;
+			float kbm, kbp;
 			calcKb(temp, hw, grain_cu[k],grain_tc[k], kbp, kbm);
 			//kbp = calcKb(temp, hw, grain_cu[k]);
 			//kbm = calcKb(temp, -hw, grain_cu[k]);
 
-			double prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
-			double prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
+			float prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
+			float prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
 			grain_prob[k] = prob_neg * (1 - grain_prob[k]) + (1 - prob_pog) * grain_prob[k];
 		}
 
@@ -562,36 +564,36 @@ __global__ void calcMidLastBitErrorRateKernel(double *mid_be_list, double *last_
 
 }
 
-void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
+void calcMidLastBitErrorRateHost(float *mid_bER, float *last_bER, float hw)
 {
 	const int list_size = BIT_COUNT;
-	double *mid_be_list = (double*)malloc(sizeof(double) * list_size);
-	double *last_be_list = (double*)malloc(sizeof(double) * list_size);
-	double *dev_mid_be_list = NULL;
-	double *dev_last_be_list = NULL;
+	float *mid_be_list = (float*)malloc(sizeof(float) * list_size);
+	float *last_be_list = (float*)malloc(sizeof(float) * list_size);
+	float *dev_mid_be_list = NULL;
+	float *dev_last_be_list = NULL;
 	unsigned long long int random_seed = (unsigned long long int)(time(NULL));
 
 	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
-	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_mid_be_list, sizeof(double) * list_size));
-	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_last_be_list, sizeof(double) * list_size));
+	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_mid_be_list, sizeof(float) * list_size));
+	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_last_be_list, sizeof(float) * list_size));
 
-	CUDA_SAFE_CALL(cudaMemcpy(dev_mid_be_list, mid_be_list, sizeof(double) * list_size, cudaMemcpyHostToDevice));
-	CUDA_SAFE_CALL(cudaMemcpy(dev_last_be_list, last_be_list, sizeof(double) * list_size, cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpy(dev_mid_be_list, mid_be_list, sizeof(float) * list_size, cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpy(dev_last_be_list, last_be_list, sizeof(float) * list_size, cudaMemcpyHostToDevice));
 	//CUDA_SAFE_CALL(cudaMemcpyToSymbol(&kRandomSeed, &random_seed, sizeof(unsigned long long int)));
 
 
 	calcMidLastBitErrorRateKernel <<<CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT>>>(dev_mid_be_list, dev_last_be_list, hw);
 	CUDA_SAFE_CALL(cudaGetLastError());
 	CUDA_SAFE_CALL(cudaDeviceSynchronize());
-	CUDA_SAFE_CALL(cudaMemcpy(mid_be_list, dev_mid_be_list, sizeof(double) * list_size, cudaMemcpyDeviceToHost));
-	CUDA_SAFE_CALL(cudaMemcpy(last_be_list, dev_last_be_list, sizeof(double) * list_size, cudaMemcpyDeviceToHost));
+	CUDA_SAFE_CALL(cudaMemcpy(mid_be_list, dev_mid_be_list, sizeof(float) * list_size, cudaMemcpyDeviceToHost));
+	CUDA_SAFE_CALL(cudaMemcpy(last_be_list, dev_last_be_list, sizeof(float) * list_size, cudaMemcpyDeviceToHost));
 
 	
-	double temp_mid_bER = 0;
-	double temp_last_bER = 0;
+	float temp_mid_bER = 0;
+	float temp_last_bER = 0;
 
 	/*// ニコイチリダクション、高精度？
-	double half = list_size / 2;
+	float half = list_size / 2;
 	for (int i = 0; i < log2(list_size)-1; i++)
 	{
 		for (int k = 0; k < half-1; k++)
@@ -622,8 +624,8 @@ void calcMidLastBitErrorRateHost(double *mid_bER, double *last_bER, double hw)
 
 	/*
 	// thrust GPUリダクション
-	thrust::device_ptr<double> dev_mid_be_ptr(dev_mid_be_list);
-	thrust::device_ptr<double> dev_last_be_ptr(dev_last_be_list);
+	thrust::device_ptr<float> dev_mid_be_ptr(dev_mid_be_list);
+	thrust::device_ptr<float> dev_last_be_ptr(dev_last_be_list);
 
 	temp_mid_bER = thrust::reduce(dev_mid_be_ptr, dev_mid_be_ptr + list_size);
 	temp_last_bER = thrust::reduce(dev_last_be_ptr, dev_last_be_ptr + list_size);
@@ -652,9 +654,9 @@ void makeHwBerList(FILE *fp)
 	{
 		printf("%d / %d \r", i, HW_LIST_SIZE);
 
-		double hw = HW_MAX * i / HW_LIST_SIZE;
-		double mid_bER = 0;
-		double last_bER = 0;
+		float hw = HW_MAX * i / HW_LIST_SIZE;
+		float mid_bER = 0;
+		float last_bER = 0;
 		calcMidLastBitErrorRateHost(&mid_bER, &last_bER, hw);
 
 		fprintf(fp, "%f\t%.10e\t%.10e\t%.10e\n", hw * 1e-3, last_bER, mid_bER, last_bER - mid_bER);
@@ -665,7 +667,7 @@ void makeContinusBerList(FILE *fp)
 {
 	const int hw_switch_ap = (int)(BIT_PITCH / LINER_VELOCITY *1.0e-9 * F0_AP);														  // 書込磁界順方向終了タイミング
 	const int attempt_count = hw_switch_ap * 3;
-	double ber[attempt_count];
+	float ber[attempt_count];
 
 	calcContinusBitErrorRateHost(ber, attempt_count, CBER_HW);
 
@@ -685,7 +687,7 @@ int main()
 	//showParameters();
 	/*
 	const int kbListSize = 150;
-	double kbList[kbListSize];
+	float kbList[kbListSize];
 
 	calcKbListHost(kbList, kbListSize,10e+3);
 	for (int i = 0; i < kbListSize; i++)
@@ -694,8 +696,8 @@ int main()
 
 	
 	/*
-	double bER_list[200];
-	double bER_list_count = 200;
+	float bER_list[200];
+	float bER_list_count = 200;
 
 	calcContinusBitErrorRateHost(bER_list, bER_list_count, CBER_HW);
 	for (int i = 0; i < bER_list_count; i++)
@@ -705,7 +707,7 @@ int main()
 	*/
 
 
-	/*
+	
 	auto start = std::chrono::system_clock::now();
 #if (BER_ALGORITHM == 1)
 
@@ -726,9 +728,9 @@ int main()
 	std::cout <<"\n"<< msec << " milli sec \n";
 	cudaProfilerStop();
 	
-	*/
+	
 
-
+	/*
 	auto start = std::chrono::system_clock::now();
 #if (BER_ALGORITHM == 1)
 
@@ -748,7 +750,7 @@ int main()
 
 	std::cout << "\n" << msec << " milli sec \n";
 	cudaProfilerStop();
-	
+	*/
 
 	//system("pause");
     return 0;

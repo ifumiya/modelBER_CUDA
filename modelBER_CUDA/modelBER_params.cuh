@@ -5,7 +5,7 @@
 #define CUDA_BLOCK_COUNT            1000                /// <summary>並列実行するCUDAブロック数                                </summary>
 #define BIT_COUNT                   (CUDA_THREAD_COUNT*CUDA_BLOCK_COUNT)											      
 #define CUDA_DEVICE_NUM             0                   /// <summary>計算に用いるデバイス (1:Quadro 0,2:Tesla)                 </summary>
-#define S_FE_MEAN_ERROR             1.0e-8              /// <summary>平均分芝の計算精度                                        </summary>
+#define S_FE_MEAN_ERROR             1.0e-5              /// <summary>平均分芝の計算精度                                        </summary>
 #define K_B                         1.38065E-16         /// <summary>ボルツマン定数　(erg/K)                                   </summary>
 #define M_B                         9.27401E-21         /// <summary>ボーア磁子 (emu)                                          </summary>
 #define S_FE_MEAN_MAX               20.0                /// <summary>分子場の最大値                                            </summary>
