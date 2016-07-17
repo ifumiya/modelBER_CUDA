@@ -39,7 +39,8 @@
 #define FE                          0.5                 /// <summary>Feの含有割合                                              </summary>
 #define HW_SW_OFFSET                0                   /// <summary>磁界を反転させるタイミング(ap count)                      </summary>
 #define CBER_HW                     10e+3               /// <summary>試行周期ごとのbERを算出する際の書込磁界(Oe)               </summary>
-#define BER_ALGORITHM               0                   /// <summary>bER算出アルゴリズム( 0: 純モンテカルロ　1: 確率+パターン  </summary>
+#define BER_ALGORITHM               1                   /// <summary>bER算出アルゴリズム( 0: 純モンテカルロ　1: 確率+パターン  </summary>
 #define INITIAL_MAG_PROB            1                   /// <summary>確率パターンにおいて、磁化確率の初期値                    </summary>
+
 
 #endif

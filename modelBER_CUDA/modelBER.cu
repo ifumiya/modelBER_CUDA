@@ -63,7 +63,7 @@ __device__ inline double calcCuFromCurie(double temp_curie)
 	return -temp_curie * (3 * K_B) / (2 * J_FE_FE * 4 * (G_FE - 1) *(G_FE - 1) * S_FE * (S_FE + 1)) + 1;
 }
 
-__device__ inline double convertTempFromAP(int ap_count)
+__host__ __device__ inline double convertTempFromAP(int ap_count)
 {
 	//return fmax(TEMP_AMBIENT, TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count);
 	double temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count;
@@ -236,7 +236,7 @@ void calcContinusBitErrorRateHost(double *bER_list, int bER_list_count, double h
 	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
 	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_be_list, sizeof(int) * bER_list_count));
 	CUDA_SAFE_CALL(cudaMemcpy(dev_be_list, be_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice));
-	CUDA_SAFE_CALL(cudaMemcpy(&kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpyToSymbol(kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
 
 	calcContinusBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_be_list, bER_list_count, hw);
@@ -663,8 +663,20 @@ void makeHwBerList(FILE *fp)
 
 void makeContinusBerList(FILE *fp)
 {
-	fprintf(stderr, "not implement at line %d", __LINE__);
-	exit(2);
+	const int hw_switch_ap = (int)(BIT_PITCH / LINER_VELOCITY *1.0e-9 * F0_AP);														  // 書込磁界順方向終了タイミング
+	const int attempt_count = hw_switch_ap * 3;
+	double ber[attempt_count];
+
+	calcContinusBitErrorRateHost(ber, attempt_count, CBER_HW);
+
+	fprintf(fp, "Count\tTemp\tTime(ns)\tbER\n");
+	for (int i = 0; i < attempt_count; i++)
+	{
+		fprintf(fp, "%d\t%f\t%f\t%e\n", i,
+			convertTempFromAP(i),
+			i * TAU_AP * 1e+9,
+			ber[i]);
+	}
 }
 
 
@@ -693,7 +705,7 @@ int main()
 	*/
 
 
-
+	/*
 	auto start = std::chrono::system_clock::now();
 #if (BER_ALGORITHM == 1)
 
@@ -712,11 +724,32 @@ int main()
 	auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
 
 	std::cout <<"\n"<< msec << " milli sec \n";
-
-
-
 	cudaProfilerStop();
 	
+	*/
+
+
+	auto start = std::chrono::system_clock::now();
+#if (BER_ALGORITHM == 1)
+
+	FILE *fp = fopen("cber_list_prob.txt", "w");
+#else
+	FILE *fp = fopen("cber_list_pure.txt", "w");
+
+#endif
+	makeContinusBerList(fp);
+	fclose(fp);
+
+
+	cudaProfilerStart();
+	auto end = std::chrono::system_clock::now();
+	auto dur = end - start;
+	auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
+
+	std::cout << "\n" << msec << " milli sec \n";
+	cudaProfilerStop();
+	
+
 	//system("pause");
     return 0;
 }
