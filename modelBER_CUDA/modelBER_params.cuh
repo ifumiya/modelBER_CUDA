@@ -2,7 +2,7 @@
 #define IG_MODEL_BER_PARAMS
 
 #define CUDA_THREAD_COUNT           500                 /// <summary>並列実行するCUDAスレッド数                                </summary>
-#define CUDA_BLOCK_COUNT            200                /// <summary>並列実行するCUDAブロック数                                </summary>
+#define CUDA_BLOCK_COUNT            2000                /// <summary>並列実行するCUDAブロック数                                </summary>
 #define BIT_COUNT                   (CUDA_THREAD_COUNT*CUDA_BLOCK_COUNT)											      
 #define CUDA_DEVICE_NUM             0                   /// <summary>計算に用いるデバイス (1:Quadro 0,2:Tesla)                 </summary>
 #define S_FE_MEAN_ERROR             1.0e-5F              /// <summary>平均分芝の計算精度                                        </summary>

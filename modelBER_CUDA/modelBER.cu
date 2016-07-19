@@ -127,10 +127,9 @@ __device__ void calcKb(float temp, float hw, float cu, float tc, float &kbp, flo
 	kbm = kbp = 0;
 	if (tc <= temp) return;
 
-	float dFeFe = BULK_D_FE_FE * KU_KBULK;
+	const float dFeFe = BULK_D_FE_FE * KU_KBULK;
 
 	float s = calc_sFe_Mean(temp, cu);
-
 	float total_atom_number = 1 / ((FE  * (1 - cu) * V_FE) + ((1 - FE)*(1 - cu) * V_PT) + cu * V_CU);
 	float ku = total_atom_number * FE * (1 - cu)* (4 * (1 - cu))  * dFeFe  * s * s;
 	float hc = 2 * ((4 * (1 - cu))  * dFeFe  * s) / (M_B * G_FE);
@@ -534,7 +533,7 @@ __global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be
 	for (int i = -attempt_offset; i < last_attempt; i++)
 	{
 
-		float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
+		float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9F * i;
 		if (temp < TEMP_AMBIENT)
 			temp = TEMP_AMBIENT;
 
