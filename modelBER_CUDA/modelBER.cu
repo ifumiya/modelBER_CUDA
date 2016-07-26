@@ -138,14 +138,72 @@ __device__ void calcKb(float temp, float hw, float cu, float tc, float &kbp, flo
 }
 
 __global__
-void calcKbListKernel(float *kb_list, int kb_list_size, float hw)
+void calcKbListKernel(float *kb_minus_list, float *kb_plus_list, int kb_list_size, int offset, float hw)
 {
-	float cu = calcCuFromCurie(TEMP_CURIE_MEAN);
-	for (int i = 0; i < kb_list_size; i++)
-	{
-		float temp = convertTempFromAP(i);
+	int i = threadIdx.x + blockDim.x * blockIdx.x;
+	if (i >= kb_list_size) return;
 
-		kb_list[i] = calcKb(temp, hw, cu);
+	float cu = calcCuFromCurie(TEMP_CURIE_MEAN);
+	float temp = convertTempFromAP(i - offset);
+	float kbp, kbm;
+	calcKb(temp, hw, cu, TEMP_CURIE_MEAN, kbp, kbm);
+	kb_plus_list[i] = kbp;
+	kb_minus_list[i] = kbm;
+}
+
+__host__
+void calcKbListHost(FILE *fp, float hw)
+{
+	int bit_ap = (int)(BIT_PITCH * 1e-9 / TAU_AP / LINER_VELOCITY);
+	int kb_list_count = bit_ap * 4;
+	int offset = bit_ap;
+
+	int thread_count = (int)(fmax(sqrt(kb_list_count),THREAD_NUM));
+	int block_count = (kb_list_count / thread_count + 1);
+
+	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
+
+	thrust::host_vector<float> host_kb_m_list(kb_list_count);
+	thrust::host_vector<float> host_kb_p_list(kb_list_count);
+	thrust::device_vector<float> dev_kb_m_list(kb_list_count);
+	thrust::device_vector<float> dev_kb_p_list(kb_list_count);
+
+	calcKbListKernel << <thread_count, block_count >> >(
+		thrust::raw_pointer_cast(dev_kb_m_list.data()),
+		thrust::raw_pointer_cast(dev_kb_p_list.data()),
+		kb_list_count,
+		offset,
+		hw);
+
+	CUDA_SAFE_CALL(cudaGetLastError());
+	CUDA_SAFE_CALL(cudaDeviceSynchronize());
+	
+	host_kb_m_list = dev_kb_m_list;
+	host_kb_p_list = dev_kb_p_list;
+
+
+	fprintf(fp , "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		"AP Count",
+		"Temp(K)",
+		"Time(ns)",
+		"Distance(nm)",
+		"Kb+",
+		"Kb-",
+		"p+",
+		"p-");
+	for (int i = 0; i < kb_list_count; i++)
+	{
+		int ap = i - offset;
+		fprintf(fp, "%d\t%e\t%e\t%e\t%e\t%e\t%e\t%e\n",
+			ap,
+			convertTempFromAP(i - offset),
+			ap * TAU_AP * 1e+9,
+			ap * TAU_AP * 1e+9 * LINER_VELOCITY,
+			host_kb_m_list[i],
+			host_kb_p_list[i],
+			exp(-host_kb_m_list[i]),
+			exp(-host_kb_p_list[i]));
+
 	}
 
 }
@@ -411,7 +469,7 @@ __device__ inline float calcPattern(float *grain_area, float *grain_prob)
 	return bit_error_rate;
 }
 
-__global__ void calcContinusBitErrorRateKernel(float *ber_list, float ber_list_count, float hw)
+__global__ void calcContinusBitErrorRateKernel(float *ber_list, int ber_list_count, float hw)
 {
 
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
@@ -650,7 +708,7 @@ void makeHwBerList(FILE *fp)
 	{
 		printf("%d / %d \r", i, HW_LIST_SIZE);
 
-		float hw = HW_MAX * i / HW_LIST_SIZE;
+		float hw = (HW_LAST- HW_FIRST) * i / HW_LIST_SIZE + HW_FIRST;
 		float mid_bER = 0;
 		float last_bER = 0;
 		calcMidLastBitErrorRateHost(&mid_bER, &last_bER, hw);
@@ -678,33 +736,21 @@ void makeContinusBerList(FILE *fp)
 }
 
 
-int main()
+/*************************************
+*
+*/
+
+
+void subKbList()
 {
-	//showParameters();
-	/*
-	const int kbListSize = 150;
-	float kbList[kbListSize];
+	FILE *fp = fopen("kb_list.txt", "w");
+	calcKbListHost(fp, 10e+3);
+	fclose(fp);
+}
 
-	calcKbListHost(kbList, kbListSize,10e+3);
-	for (int i = 0; i < kbListSize; i++)
-		printf("%f\n", kbList[i]);
-	*/
-
+void subHwBER()
+{
 	
-	/*
-	float bER_list[200];
-	float bER_list_count = 200;
-
-	calcContinusBitErrorRateHost(bER_list, bER_list_count, CBER_HW);
-	for (int i = 0; i < bER_list_count; i++)
-	{
-		printf("%f \n", bER_list[i]);
-	}
-	*/
-
-
-	
-	auto start = std::chrono::system_clock::now();
 #if (BER_ALGORITHM == 1)
 
 	FILE *fp = fopen("hw_list_prob.txt", "w");
@@ -714,20 +760,11 @@ int main()
 #endif
 	makeHwBerList(fp);
 	fclose(fp);
+}
 
 
-	cudaProfilerStart();
-	auto end = std::chrono::system_clock::now();
-	auto dur = end - start;
-	auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
-
-	std::cout <<"\n"<< msec << " milli sec \n";
-	cudaProfilerStop();
-	
-	
-
-	/*
-	auto start = std::chrono::system_clock::now();
+void subContinusBER()
+{
 #if (BER_ALGORITHM == 1)
 
 	FILE *fp = fopen("cber_list_prob.txt", "w");
@@ -737,17 +774,22 @@ int main()
 #endif
 	makeContinusBerList(fp);
 	fclose(fp);
+}
 
 
+int main()
+{
+	auto start = std::chrono::system_clock::now();
 	cudaProfilerStart();
+
+
+
+
 	auto end = std::chrono::system_clock::now();
 	auto dur = end - start;
 	auto msec = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
 
 	std::cout << "\n" << msec << " milli sec \n";
 	cudaProfilerStop();
-	*/
-
-	//system("pause");
     return 0;
 }

@@ -92,6 +92,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <PtxAsOptionV>true</PtxAsOptionV>
       <FastMath>true</FastMath>
       <CodeGeneration>compute_35,sm_35</CodeGeneration>
+      <Warning>InheritFromHost</Warning>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -115,6 +116,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <PtxAsOptionV>true</PtxAsOptionV>
       <FastMath>true</FastMath>
       <CodeGeneration>compute_35,sm_35</CodeGeneration>
+      <Warning>InheritFromHost</Warning>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -142,6 +144,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <PtxAsOptionV>true</PtxAsOptionV>
       <FastMath>true</FastMath>
       <CodeGeneration>compute_35,sm_35</CodeGeneration>
+      <Warning>InheritFromHost</Warning>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -169,6 +172,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <PtxAsOptionV>true</PtxAsOptionV>
       <FastMath>true</FastMath>
       <CodeGeneration>compute_35,sm_35</CodeGeneration>
+      <Warning>InheritFromHost</Warning>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
