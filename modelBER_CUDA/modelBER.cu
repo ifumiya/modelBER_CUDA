@@ -25,6 +25,9 @@
 __constant__ unsigned long long int kRandomSeed;		/// <summary>乱数のシード値</summary>
 
 
+// ##########################################################################################
+// # CUDA 用ユーティリティ
+
 
 #define CUDA_SAFE_CALL(func) \
 { \
@@ -50,16 +53,20 @@ __device__ double atomicAdd(double* address, double val)
 	} while (assumed != old);
 	return __longlong_as_double(old);
 }
-
-
 #endif
+
+// ##########################################################################################
+// # ロジック (アルゴリズム共通部分)
+
+
 
 __device__ inline float calcCurieFromCu(float cu)
 {
 	return (2 * J_FE_FE * 4 * (1 - cu) * (G_FE - 1)  * (G_FE - 1) * S_FE * (S_FE + 1)) / (3 * K_B);
 }
 
-__device__ inline float calcCuFromCurie(float temp_curie)
+
+__host__ __device__ inline float calcCuFromCurie(float temp_curie)
 {
 	return -temp_curie * (3 * K_B) / (2 * J_FE_FE * 4 * (G_FE - 1) *(G_FE - 1) * S_FE * (S_FE + 1)) + 1;
 }
@@ -71,8 +78,13 @@ __host__ __device__ inline float convertTempFromAP(int ap_count)
 	return temp < TEMP_AMBIENT ? TEMP_AMBIENT : temp;
 }
 
+__host__ __device__ inline float convertTimeFromTemp(float temp)
+{
+	return (TEMP_CURIE_MEAN - temp) / THERMAL_GRADIENT / LINER_VELOCITY;
+}
 
-__device__ inline float calcBrillouin(float s, float x)
+
+__host__ __device__ inline float calcBrillouin(float s, float x)
 {
 
 	float o2 = 1 / (2 * S_FE);
@@ -81,7 +93,7 @@ __device__ inline float calcBrillouin(float s, float x)
 	
 }
 
-__device__ float calc_sFe_Mean(float temp, float cu)
+__host__ __device__ float calc_sFe_Mean(float temp, float cu)
 {
 	float vl = S_FE_MEAN_ERROR;
 	float vr = S_FE_MEAN_MAX;
@@ -89,7 +101,7 @@ __device__ float calc_sFe_Mean(float temp, float cu)
 	float dxdv = (S_FE * 2 * J_FE_FE * 4 * (1 - cu) * (G_FE - 1)*(G_FE - 1)) / (K_B * temp);
 	do
 	{
-		v = (vl + vr) / 2.0;
+		v = (vl + vr) / 2.0F;
 		float br = S_FE *(2 * S_FE + 1) / (2 * S_FE) / tanh((2 * S_FE + 1) / (2 * S_FE) * dxdv * v) - S_FE  / (2 * S_FE) / tanh(1 / (2 * S_FE) * dxdv * v);
 		float f = v - br;
 		//float f = v - S_FE * calcBrillouin(S_FE, dxdv * v);
@@ -206,6 +218,33 @@ void calcKbListHost(FILE *fp, float hw)
 
 	}
 
+}
+
+float calcRecordingTimeWindow(float hw)
+{
+	float dFeFe = BULK_D_FE_FE * KU_KBULK;
+	float cu = calcCuFromCurie(TEMP_CURIE_MEAN);
+
+	float temp_low = TEMP_AMBIENT;
+	float temp_high = TEMP_CURIE_MEAN;
+	float temp = (temp_low + temp_high) / 2.0F;
+
+	// TODO : S_FE_MEAN_ERRORの誤用
+	while (fabs((temp_high - temp_low) / temp) > S_FE_MEAN_ERROR)
+	{
+		
+		float s = calc_sFe_Mean(temp, cu);
+		float hc = 2 * ((4 * (1 - cu))  * dFeFe  * s) / (M_B * G_FE);
+
+		if (hc < hw)
+			temp_high = temp;
+		else
+			temp_low = temp;
+
+		temp = (temp_high + temp_low) / 2.0F;
+	}
+
+	return convertTimeFromTemp(temp);
 }
 
 
@@ -700,20 +739,26 @@ void calcMidLastBitErrorRateHost(float *mid_bER, float *last_bER, float hw)
 #endif
 
 
+// ################################################################################################
+// #
+
+
 
 void makeHwBerList(FILE *fp)
 {
-	fprintf(fp, "Hw[kOe]\tbER\tbER(WE)\tbER(EAW)\n");
+	fprintf(fp, "Hw[kOe]\tTrw[ns]\tbER\tbER(WE)\tbER(EAW)\n");
 	for (int i = 0; i < HW_LIST_SIZE; i++)
 	{
 		printf("%d / %d \r", i, HW_LIST_SIZE);
 
 		float hw = (HW_LAST- HW_FIRST) * i / HW_LIST_SIZE + HW_FIRST;
+		float trw = calcRecordingTimeWindow(hw);
+
 		float mid_bER = 0;
 		float last_bER = 0;
 		calcMidLastBitErrorRateHost(&mid_bER, &last_bER, hw);
 
-		fprintf(fp, "%f\t%.10e\t%.10e\t%.10e\n", hw * 1e-3, last_bER, mid_bER, last_bER - mid_bER);
+		fprintf(fp, "%f\t%e\t%.10e\t%.10e\t%.10e\n", hw * 1e-3,trw, last_bER, mid_bER, last_bER - mid_bER);
 	}
 }
 
@@ -782,7 +827,9 @@ int main()
 	auto start = std::chrono::system_clock::now();
 	cudaProfilerStart();
 
-
+	subKbList();
+//	subContinusBER();
+	subHwBER();
 
 
 	auto end = std::chrono::system_clock::now();

@@ -180,6 +180,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="modelBER_params.cuh" />
+    <ClInclude Include="modelBER_params_default.cuh" />
   </ItemGroup>
   <ItemGroup>
     <None Include="modelBER_CUDA.exe.bat">
