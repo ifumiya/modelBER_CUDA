@@ -3,7 +3,7 @@
 
 #define CUDA_THREAD_COUNT           500                  /// <summary>並列実行するCUDAスレッド数                                </summary>
 #define CUDA_BLOCK_COUNT            2000                 /// <summary>並列実行するCUDAブロック数                                </summary>
-#define BIT_COUNT                   (CUDA_THREAD_COUNT*CUDA_BLOCK_COUNT)	/// <summary> BERの平均を取る </summary>										      
+#define BIT_COUNT                   (CUDA_THREAD_COUNT*CUDA_BLOCK_COUNT)	/// <summary> BERの平均を取る                       </summary>										      
 #define CUDA_DEVICE_NUM             0                    /// <summary>計算に用いるデバイス (1:Quadro 0,2:Tesla)                 </summary>
 #define S_FE_MEAN_ERROR             1.0e-5F              /// <summary>平均分芝の計算精度                                        </summary>
 #define K_B                         1.38065E-16F         /// <summary>ボルツマン定数　(erg/K)                                   </summary>
@@ -33,15 +33,17 @@
 #define GRAIN_VOLUME                1.93342723470e-19F   /// <summary>グレインの平均面積(cm^3)                                  </summary>   
 #define BIT_PITCH                   6.8F                 /// <summary>ビット幅(nm)                                              </summary>
 #define LINER_VELOCITY              10                   /// <summary>線速度(m/s nm/ns)                                         </summary>
-#define GRAIN_SD                    0.10F                /// <summary>グレインサイズ分散                                        </summary>
-#define GRAIN_MEAN                  1.0F                 /// <summary>グレインサイズ平均                                        </summary>
-#define TEMP_CURIE_SD               0.0F                 /// <summary>Tc分散                                                    </summary>
+#define GRAIN_SD                    0.10F                /// <summary>グレインサイズ標準偏差                                    </summary>
+#define GRAIN_MEAN                  1.0F                 /// <summary>グレインサイズ平均(計算上の)                              </summary>
+#define TEMP_CURIE_SD               0.0F                 /// <summary>Tc標準偏差                                                </summary>
 #define TEMP_CURIE_MEAN             700.0F               /// <summary>Tc平均                                                    </summary>
 #define FE                          0.5F                 /// <summary>Feの含有割合                                              </summary>
 #define HW_SW_OFFSET                0                    /// <summary>磁界を反転させるタイミング(ap count)                      </summary>
-#define CBER_HW                     15e+3F               /// <summary>試行周期ごとのbERを算出する際の書込磁界(Oe)               </summary>
+#define CBER_HW                     14.3e+3F             /// <summary>試行周期ごとのbERを算出する際の書込磁界(Oe)               </summary>
 #define BER_ALGORITHM               1                    /// <summary>bER算出アルゴリズム( 0: 純モンテカルロ　1: 確率+パターン  </summary>
 #define INITIAL_MAG_PROB            0.5                  /// <summary>確率パターンにおいて、磁化確率の初期値                    </summary>
-#define PROGRAM_MODE				0					 /// <summary> </summary>
+#define PROGRAM_MODE				0					 /// <summary>                                                          </summary>
+#define SIM_TITLE					""					 /// <summary>                                                          </summary>
+#define SIM_COMMENT					""					 /// <summary>                                                          </summary>
 
 #endif

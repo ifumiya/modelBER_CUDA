@@ -22,7 +22,7 @@
 #include "modelBER_params.cuh"
 
 
-__constant__ unsigned long long int kRandomSeed;		/// <summary>乱数のシード値</summary>
+__constant__ unsigned long long int kRandomSeed[1];		/// <summary>乱数のシード値</summary>
 
 
 // ##########################################################################################
@@ -59,21 +59,28 @@ __device__ double atomicAdd(double* address, double val)
 // # ロジック (アルゴリズム共通部分)
 
 
-
+/// <summary>Cu組成からキュリー温度を算出します</summary>
+/// <param name='cu'> Cu組成</param> 
+/// <returns>キュリー温度 (K) </returns>
 __device__ inline float calcCurieFromCu(float cu)
 {
 	return (2 * J_FE_FE * 4 * (1 - cu) * (G_FE - 1)  * (G_FE - 1) * S_FE * (S_FE + 1)) / (3 * K_B);
 }
 
-
+/// <summary>　キュリー温度からをCu組成算出します</summary>
+/// <param name='temp_curie'> キュリー温度 (K)</param> 
+/// <returns>Cu組成</returns>
 __host__ __device__ inline float calcCuFromCurie(float temp_curie)
 {
 	return -temp_curie * (3 * K_B) / (2 * J_FE_FE * 4 * (G_FE - 1) *(G_FE - 1) * S_FE * (S_FE + 1)) + 1;
 }
 
+/// <summary>試行回数から温度を算出します</summary>
+/// <param name='ap_count'> 試行回数 </param> 
+/// <returns>温度</returns>
 __host__ __device__ inline float convertTempFromAP(int ap_count)
 {
-	//return fmax(TEMP_AMBIENT, TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * ap_count);
+
 	float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9F * ap_count;
 	return temp < TEMP_AMBIENT ? TEMP_AMBIENT : temp;
 }
@@ -274,7 +281,7 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 
 
 	curandStateMRG32k3a rand_stat;			// 乱数ステータス	
-	curand_init(kRandomSeed, thread_number, ber_list_count * GRAIN_COUNT, &rand_stat);
+	curand_init(*kRandomSeed, thread_number, ber_list_count * GRAIN_COUNT, &rand_stat);
 
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
@@ -331,7 +338,7 @@ void calcContinusBitErrorRateHost(float *bER_list, int bER_list_count, float hw)
 	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
 	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_be_list, sizeof(int) * bER_list_count));
 	CUDA_SAFE_CALL(cudaMemcpy(dev_be_list, be_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice));
-	CUDA_SAFE_CALL(cudaMemcpyToSymbol(kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpyToSymbol(*kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
 
 	calcContinusBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_be_list, bER_list_count, hw);
@@ -365,7 +372,7 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 
 
 	curandStateMRG32k3a rand_stat;			// 乱数ステータス	
-	curand_init(kRandomSeed, thread_number, last_attempt * GRAIN_COUNT, &rand_stat);
+	curand_init(*kRandomSeed, thread_number, last_attempt * GRAIN_COUNT, &rand_stat);
 
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
@@ -524,7 +531,7 @@ __global__ void calcContinusBitErrorRateKernel(float *ber_list, int ber_list_cou
 
 
 	curandStateMRG32k3a rand_stat;			// 乱数ステータス	
-	curand_init(kRandomSeed, thread_number, ber_list_count * GRAIN_COUNT, &rand_stat);
+	curand_init(*kRandomSeed, thread_number, ber_list_count * GRAIN_COUNT, &rand_stat);
 
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
@@ -571,6 +578,7 @@ void calcContinusBitErrorRateHost(float *bER_list, int bER_list_count, float hw)
 {
 	float *dev_ber_list;
 	unsigned long long int random_seed = (unsigned long long int)(time(NULL));
+	unsigned long long int *random_seed_ptr = &random_seed;
 
 	for (int i = 0; i < bER_list_count; i++)
 		bER_list[i] = 0;
@@ -579,7 +587,7 @@ void calcContinusBitErrorRateHost(float *bER_list, int bER_list_count, float hw)
 	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_ber_list, sizeof(int) * bER_list_count));
 	CUDA_SAFE_CALL(cudaMemcpy(dev_ber_list, bER_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice));
 
-	//CUDA_SAFE_CALL(cudaMemcpy(&kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpyToSymbol(kRandomSeed, &random_seed, sizeof(unsigned long long int)));
 	
 	calcContinusBitErrorRateKernel <<< CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >>>(dev_ber_list, bER_list_count, hw);
 
@@ -613,7 +621,7 @@ __global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be
 
 
 	curandStateMRG32k3a rand_stat;			// 乱数ステータス	
-	curand_init(kRandomSeed, thread_number, last_attempt * GRAIN_COUNT, &rand_stat);
+	curand_init(*kRandomSeed, thread_number, last_attempt * GRAIN_COUNT, &rand_stat);
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
@@ -672,7 +680,7 @@ void calcMidLastBitErrorRateHost(float *mid_bER, float *last_bER, float hw)
 
 	CUDA_SAFE_CALL(cudaMemcpy(dev_mid_be_list, mid_be_list, sizeof(float) * list_size, cudaMemcpyHostToDevice));
 	CUDA_SAFE_CALL(cudaMemcpy(dev_last_be_list, last_be_list, sizeof(float) * list_size, cudaMemcpyHostToDevice));
-	//CUDA_SAFE_CALL(cudaMemcpyToSymbol(&kRandomSeed, &random_seed, sizeof(unsigned long long int)));
+	CUDA_SAFE_CALL(cudaMemcpyToSymbol(kRandomSeed, &random_seed, sizeof(unsigned long long int)));
 
 
 	calcMidLastBitErrorRateKernel <<<CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT>>>(dev_mid_be_list, dev_last_be_list, hw);
@@ -780,29 +788,97 @@ void makeContinusBerList(FILE *fp)
 	}
 }
 
+void writeParamsEx(FILE *fp)
+{
+	fprintf(fp, "CUDA_THREAD_COUNT\t%e", CUDA_THREAD_COUNT);
+	fprintf(fp, "CUDA_BLOCK_COUNT\t%e", CUDA_BLOCK_COUNT);
+	fprintf(fp, "BIT_COUNT\t%e", BIT_COUNT);
+	fprintf(fp, "CUDA_DEVICE_NUM\t%e", CUDA_DEVICE_NUM);
+	fprintf(fp, "S_FE_MEAN_ERROR\t%e", S_FE_MEAN_ERROR);
+	fprintf(fp, "K_B\t%e", K_B);
+	fprintf(fp, "M_B\t%e", M_B);
+	fprintf(fp, "S_FE_MEAN_MAX\t%e", S_FE_MEAN_MAX);
+	fprintf(fp, "F0_AP\t%e", F0_AP);
+	fprintf(fp, "TAU_AP\t%e", TAU_AP);
+	fprintf(fp, "HW_FIRST\t%e", HW_FIRST);
+	fprintf(fp, "HW_LAST\t%e", HW_LAST);
+	fprintf(fp, "HW_LIST_SIZE\t%e", HW_LIST_SIZE);
+	fprintf(fp, "READABLE_THRETH_PER_GRAIN\t%e", READABLE_THRETH_PER_GRAIN);
+	fprintf(fp, "READABLE_THRETH\t%e", READABLE_THRETH);
+	fprintf(fp, "G_FE\t%e", G_FE);
+	fprintf(fp, "S_FE\t%e", S_FE);
+	fprintf(fp, "V_FE\t%e", V_FE);
+	fprintf(fp, "V_PT\t%e", V_PT);
+	fprintf(fp, "V_CU\t%e", V_CU);
+	fprintf(fp, "KU_KBULK\t%e", KU_KBULK);
+	fprintf(fp, "J_FE_FE\t%e", J_FE_FE);
+	fprintf(fp, "BULK_D_FE_FE\t%e", BULK_D_FE_FE);
+	fprintf(fp, "THERMAL_GRADIENT\t%e", THERMAL_GRADIENT);
+	fprintf(fp, "TEMP_AMBIENT\t%e", TEMP_AMBIENT);
+	fprintf(fp, "BIT_AREA\t%e", BIT_AREA);
+	fprintf(fp, "GRAIN_COUNT\t%e", GRAIN_COUNT);
+	fprintf(fp, "S_DELTA\t%e", S_DELTA);
+	fprintf(fp, "THICKNESS\t%e", THICKNESS);
+	fprintf(fp, "GRAIN_VOLUME\t%e", GRAIN_VOLUME);
+	fprintf(fp, "BIT_PITCH\t%e", BIT_PITCH);
+	fprintf(fp, "LINER_VELOCITY\t%e", LINER_VELOCITY);
+	fprintf(fp, "GRAIN_SD\t%e", GRAIN_SD);
+	fprintf(fp, "GRAIN_MEAN\t%e", GRAIN_MEAN);
+	fprintf(fp, "TEMP_CURIE_SD\t%e", TEMP_CURIE_SD);
+	fprintf(fp, "TEMP_CURIE_MEAN\t%e", TEMP_CURIE_MEAN);
+	fprintf(fp, "FE\t%e", FE);
+	fprintf(fp, "HW_SW_OFFSET\t%e", HW_SW_OFFSET);
+	fprintf(fp, "CBER_HW\t%e", CBER_HW);
+	fprintf(fp, "BER_ALGORITHM\t%e", BER_ALGORITHM);
+	fprintf(fp, "INITIAL_MAG_PROB\t%e", INITIAL_MAG_PROB);
+	fprintf(fp, "PROGRAM_MODE\t%e", PROGRAM_MODE);
+	fprintf(fp, "SIM_TITLE\t%e", SIM_TITLE);
+	fprintf(fp, "SIM_COMMENT\t%e", SIM_COMMENT);
+}
+
+void getFilename(char *buf, char *prefix)
+{
+	time_t now = time(NULL);
+	tm* t = localtime(&now);
+	sprintf(buf, "%s_%s__%04d%02d%02d%_%02d%02d.txt", SIM_TITLE, prefix, t->tm_year+1900, t->tm_mon, t->tm_mday, t->tm_hour, t->tm_min);
+}
+
 
 /*************************************
 *
 */
 
 
+void subWriteParam(char* base_filename)
+{
+	char param_filename[256];
+	sprintf(param_filename, "%s.param.txt", base_filename);
+	FILE *fp = fopen(param_filename, "w");
+	writeParamsEx(fp);
+	fclose(fp);
+}
+
+
 void subKbList()
 {
-	FILE *fp = fopen("kb_list.txt", "w");
+	char filename[256];
+	getFilename(filename, "kb");
+	sprintf(filename, "%s_kb_list.txt", SIM_TITLE);
+
+	subWriteParam(filename);
+	FILE *fp = fopen(filename, "w");
 	calcKbListHost(fp, 10e+3);
 	fclose(fp);
 }
 
 void subHwBER()
 {
-	
-#if (BER_ALGORITHM == 1)
+	char filename[256];
+	getFilename(filename, "hw");
+	sprintf(filename, "%s_hw_list.txt", SIM_TITLE);
 
-	FILE *fp = fopen("hw_list_prob.txt", "w");
-#else
-	FILE *fp = fopen("hw_list_pure.txt", "w");
-
-#endif
+	subWriteParam(filename);
+	FILE *fp = fopen(filename, "w");
 	makeHwBerList(fp);
 	fclose(fp);
 }
@@ -810,25 +886,27 @@ void subHwBER()
 
 void subContinusBER()
 {
-#if (BER_ALGORITHM == 1)
+	char filename[256];
+	char prefix[256];
+	sprintf(prefix, "cber_%e", CBER_HW / 1e+3);
+	getFilename(filename, prefix);
 
-	FILE *fp = fopen("cber_list_prob.txt", "w");
-#else
-	FILE *fp = fopen("cber_list_pure.txt", "w");
-
-#endif
+	subWriteParam(filename);
+	FILE *fp = fopen(filename, "w");
 	makeContinusBerList(fp);
 	fclose(fp);
 }
 
 
+
 int main()
 {
+	
 	auto start = std::chrono::system_clock::now();
 	cudaProfilerStart();
 
 	subKbList();
-//	subContinusBER();
+	subContinusBER();
 	subHwBER();
 
 
@@ -839,4 +917,5 @@ int main()
 	std::cout << "\n" << msec << " milli sec \n";
 	cudaProfilerStop();
     return 0;
+
 }
