@@ -19,7 +19,7 @@
 #include <chrono>
 
 
-#include "modelBER_params.cuh"
+#include "modelBER_params_link.cuh"
 
 
 __constant__ unsigned long long int kRandomSeed[1];		/// <summary>乱数のシード値</summary>
@@ -173,11 +173,11 @@ void calcKbListKernel(float *kb_minus_list, float *kb_plus_list, int kb_list_siz
 __host__
 void calcKbListHost(FILE *fp, float hw)
 {
-	int bit_ap = (int)(BIT_PITCH * 1e-9 / TAU_AP / LINER_VELOCITY);
+	int bit_ap = (int)(BIT_PITCH * 1e-9 / TAU_AP / LINER_VELOCITY + 0.9F);
 	int kb_list_count = bit_ap * 4;
 	int offset = bit_ap;
 
-	int thread_count = (int)(fmax(sqrt(kb_list_count),THREAD_NUM));
+	int thread_count = (int)(fmin(kb_list_count,THREAD_NUM));
 	int block_count = (kb_list_count / thread_count + 1);
 
 	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
@@ -218,10 +218,10 @@ void calcKbListHost(FILE *fp, float hw)
 			convertTempFromAP(i - offset),
 			ap * TAU_AP * 1e+9,
 			ap * TAU_AP * 1e+9 * LINER_VELOCITY,
-			host_kb_m_list[i],
 			host_kb_p_list[i],
-			exp(-host_kb_m_list[i]),
-			exp(-host_kb_p_list[i]));
+			host_kb_m_list[i],
+			exp(-host_kb_p_list[i]),
+			exp(-host_kb_m_list[i]));
 
 	}
 
@@ -286,12 +286,12 @@ __global__ void calcContinusBitErrorRateKernel(int *ber_list, int ber_list_count
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_tc[i] = curand_normal(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
-		float a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
+		float a = curand_log_normal(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
-		grain_dir[i] = 1;
+		grain_dir[i] = -1;
 	}
 
 	float signed_hw = hw;
@@ -338,7 +338,7 @@ void calcContinusBitErrorRateHost(float *bER_list, int bER_list_count, float hw)
 	CUDA_SAFE_CALL(cudaSetDevice(CUDA_DEVICE_NUM));
 	CUDA_SAFE_CALL(cudaMalloc((void**)&dev_be_list, sizeof(int) * bER_list_count));
 	CUDA_SAFE_CALL(cudaMemcpy(dev_be_list, be_list, sizeof(int) * bER_list_count, cudaMemcpyHostToDevice));
-	CUDA_SAFE_CALL(cudaMemcpyToSymbol(*kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
+	CUDA_SAFE_CALL(cudaMemcpyToSymbol(kRandomSeed, &random_seed, sizeof(unsigned long long int), cudaMemcpyHostToDevice));
 
 
 	calcContinusBitErrorRateKernel << <CUDA_BLOCK_COUNT, CUDA_THREAD_COUNT >> >(dev_be_list, bER_list_count, hw);
@@ -377,12 +377,12 @@ __global__ void calcMidLastBitErrorRateKernel(int *mid_be_list, int *last_be_lis
 
 	for (int i = 0; i < GRAIN_COUNT; i++)
 	{
-		grain_tc[i] = curand_normal_double(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
+		grain_tc[i] = curand_normal(&rand_stat) * TEMP_CURIE_SD * TEMP_CURIE_MEAN + TEMP_CURIE_MEAN;
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
-		float a = curand_log_normal_double(&rand_stat, grain_size_mu, grain_size_sigma);
+		float a = curand_log_normal(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
-		grain_dir[i] = 1;
+		grain_dir[i] = -1;
 	}
 	mid_be_list[thread_number] = 0;
 	last_be_list[thread_number] = 0;
@@ -541,12 +541,21 @@ __global__ void calcContinusBitErrorRateKernel(float *ber_list, int ber_list_cou
 		float a = curand_log_normal(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
 		//grain_ku_kum[i] = 1;
+#ifndef INITIAL_MAG_PROB
+		grain_prob[i] = curand_uniform(&rand_stat); //INITIAL_MAG_PROB;
+#else
 		grain_prob[i] = INITIAL_MAG_PROB;
+#endif
 	}
 
 
 	for (int i = -attempt_offset; i < ber_list_count; i++)
 	{
+		if (i >= 0)
+		{
+			float ber = calcPattern(grain_area, grain_prob);
+			atomicAdd(&ber_list[i], ber);
+		}
 
 		float temp = TEMP_CURIE_MEAN - THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9 * i;
 		if (temp < TEMP_AMBIENT)
@@ -569,8 +578,7 @@ __global__ void calcContinusBitErrorRateKernel(float *ber_list, int ber_list_cou
 
 
 
-		float ber = calcPattern(grain_area, grain_prob);
-		atomicAdd(&ber_list[i], ber);
+
 	}
 }
 
@@ -578,7 +586,6 @@ void calcContinusBitErrorRateHost(float *bER_list, int bER_list_count, float hw)
 {
 	float *dev_ber_list;
 	unsigned long long int random_seed = (unsigned long long int)(time(NULL));
-	unsigned long long int *random_seed_ptr = &random_seed;
 
 	for (int i = 0; i < bER_list_count; i++)
 		bER_list[i] = 0;
@@ -608,7 +615,7 @@ __global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be
 {
 
 	int thread_number = threadIdx.x + blockIdx.x * blockDim.x;
-	float grain_prob[GRAIN_COUNT];			// グレインの逆方向に向いている確率
+	float grain_prob[GRAIN_COUNT];			// グレインが逆方向に向いている確率
 	float grain_tc[GRAIN_COUNT];			// グレインごとのTc
 	float grain_cu[GRAIN_COUNT];			// グレインごとのCu組成
 	float grain_area[GRAIN_COUNT];			// グレインごとの面積
@@ -617,7 +624,7 @@ __global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be
 	float grain_size_sigma = (sqrt(log((GRAIN_SD * GRAIN_SD) / (GRAIN_MEAN * GRAIN_MEAN) + 1)));									  // グレインサイズ分散のσ
 	const int hw_switch_ap = (int)(BIT_PITCH / LINER_VELOCITY *1.0e-9 * F0_AP);														  // 書込磁界順方向終了タイミング
 	const int attempt_offset = (int)(TEMP_CURIE_MEAN * TEMP_CURIE_SD * 2 / (THERMAL_GRADIENT * LINER_VELOCITY * TAU_AP * 1.0e+9));	  // Tcm以前の予備シミュレーション
-	const int last_attempt = hw_switch_ap * 2 + attempt_offset;
+	const int last_attempt = hw_switch_ap * 4 + attempt_offset;
 
 
 	curandStateMRG32k3a rand_stat;			// 乱数ステータス	
@@ -629,7 +636,11 @@ __global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be
 		grain_cu[i] = calcCuFromCurie(grain_tc[i]);
 		float a = curand_log_normal(&rand_stat, grain_size_mu, grain_size_sigma);
 		grain_area[i] = a * a;
+#ifndef INITIAL_MAG_PROB
+		grain_prob[i] = curand_uniform(&rand_stat); //INITIAL_MAG_PROB;
+#else
 		grain_prob[i] = INITIAL_MAG_PROB;
+#endif
 		//grain_ku_kum[i] = 1;
 	}
 	mid_be_list[thread_number] = 0;
@@ -651,8 +662,8 @@ __global__ void calcMidLastBitErrorRateKernel(float *mid_be_list, float *last_be
 			//kbp = calcKb(temp, hw, grain_cu[k]);
 			//kbm = calcKb(temp, -hw, grain_cu[k]);
 
-			float prob_neg = 0 <= i && i < hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
-			float prob_pog = 0 <= i && i < hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
+			float prob_neg = 0 <= i && i <= hw_switch_ap ? exp(-kbp * grain_area[k]) : exp(-kbm * grain_area[k]);
+			float prob_pog = 0 <= i && i <= hw_switch_ap ? exp(-kbm * grain_area[k]) : exp(-kbp * grain_area[k]);
 			grain_prob[k] = prob_neg * (1 - grain_prob[k]) + (1 - prob_pog) * grain_prob[k];
 		}
 
@@ -755,7 +766,7 @@ void calcMidLastBitErrorRateHost(float *mid_bER, float *last_bER, float hw)
 void makeHwBerList(FILE *fp)
 {
 	fprintf(fp, "Hw[kOe]\tTrw[ns]\tbER\tbER(WE)\tbER(EAW)\n");
-	for (int i = 0; i < HW_LIST_SIZE; i++)
+	for (int i = 1; i <= HW_LIST_SIZE; i++)
 	{
 		printf("%d / %d \r", i, HW_LIST_SIZE);
 
@@ -790,57 +801,70 @@ void makeContinusBerList(FILE *fp)
 
 void writeParamsEx(FILE *fp)
 {
-	fprintf(fp, "CUDA_THREAD_COUNT\t%e", CUDA_THREAD_COUNT);
-	fprintf(fp, "CUDA_BLOCK_COUNT\t%e", CUDA_BLOCK_COUNT);
-	fprintf(fp, "BIT_COUNT\t%e", BIT_COUNT);
-	fprintf(fp, "CUDA_DEVICE_NUM\t%e", CUDA_DEVICE_NUM);
-	fprintf(fp, "S_FE_MEAN_ERROR\t%e", S_FE_MEAN_ERROR);
-	fprintf(fp, "K_B\t%e", K_B);
-	fprintf(fp, "M_B\t%e", M_B);
-	fprintf(fp, "S_FE_MEAN_MAX\t%e", S_FE_MEAN_MAX);
-	fprintf(fp, "F0_AP\t%e", F0_AP);
-	fprintf(fp, "TAU_AP\t%e", TAU_AP);
-	fprintf(fp, "HW_FIRST\t%e", HW_FIRST);
-	fprintf(fp, "HW_LAST\t%e", HW_LAST);
-	fprintf(fp, "HW_LIST_SIZE\t%e", HW_LIST_SIZE);
-	fprintf(fp, "READABLE_THRETH_PER_GRAIN\t%e", READABLE_THRETH_PER_GRAIN);
-	fprintf(fp, "READABLE_THRETH\t%e", READABLE_THRETH);
-	fprintf(fp, "G_FE\t%e", G_FE);
-	fprintf(fp, "S_FE\t%e", S_FE);
-	fprintf(fp, "V_FE\t%e", V_FE);
-	fprintf(fp, "V_PT\t%e", V_PT);
-	fprintf(fp, "V_CU\t%e", V_CU);
-	fprintf(fp, "KU_KBULK\t%e", KU_KBULK);
-	fprintf(fp, "J_FE_FE\t%e", J_FE_FE);
-	fprintf(fp, "BULK_D_FE_FE\t%e", BULK_D_FE_FE);
-	fprintf(fp, "THERMAL_GRADIENT\t%e", THERMAL_GRADIENT);
-	fprintf(fp, "TEMP_AMBIENT\t%e", TEMP_AMBIENT);
-	fprintf(fp, "BIT_AREA\t%e", BIT_AREA);
-	fprintf(fp, "GRAIN_COUNT\t%e", GRAIN_COUNT);
-	fprintf(fp, "S_DELTA\t%e", S_DELTA);
-	fprintf(fp, "THICKNESS\t%e", THICKNESS);
-	fprintf(fp, "GRAIN_VOLUME\t%e", GRAIN_VOLUME);
-	fprintf(fp, "BIT_PITCH\t%e", BIT_PITCH);
-	fprintf(fp, "LINER_VELOCITY\t%e", LINER_VELOCITY);
-	fprintf(fp, "GRAIN_SD\t%e", GRAIN_SD);
-	fprintf(fp, "GRAIN_MEAN\t%e", GRAIN_MEAN);
-	fprintf(fp, "TEMP_CURIE_SD\t%e", TEMP_CURIE_SD);
-	fprintf(fp, "TEMP_CURIE_MEAN\t%e", TEMP_CURIE_MEAN);
-	fprintf(fp, "FE\t%e", FE);
-	fprintf(fp, "HW_SW_OFFSET\t%e", HW_SW_OFFSET);
-	fprintf(fp, "CBER_HW\t%e", CBER_HW);
-	fprintf(fp, "BER_ALGORITHM\t%e", BER_ALGORITHM);
-	fprintf(fp, "INITIAL_MAG_PROB\t%e", INITIAL_MAG_PROB);
-	fprintf(fp, "PROGRAM_MODE\t%e", PROGRAM_MODE);
-	fprintf(fp, "SIM_TITLE\t%e", SIM_TITLE);
-	fprintf(fp, "SIM_COMMENT\t%e", SIM_COMMENT);
+#define fprintf_def_(x)       #x
+#define fprintf_def(fp,def)   fprintf(fp,"%-25s\t%-10s\t%g\n", #def ,fprintf_def_(def),(double)(def));
+#define fprintf_def_str(fp,def)   fprintf(fp,"%-25s\t%-10s\t%g\n", #def ,fprintf_def_(def));
+
+	fprintf_def(fp, CUDA_THREAD_COUNT);
+	fprintf_def(fp, CUDA_BLOCK_COUNT);
+	fprintf_def(fp, BIT_COUNT);
+	fprintf_def(fp, CUDA_DEVICE_NUM);
+	fprintf_def(fp, S_FE_MEAN_ERROR);
+	fprintf_def(fp, K_B);
+	fprintf_def(fp, M_B);
+	fprintf_def(fp, S_FE_MEAN_MAX);
+	fprintf_def(fp, F_AP);
+	fprintf_def(fp, ALPHA_AP);
+	fprintf_def(fp, F0_AP);
+	fprintf_def(fp, TAU_AP);
+	fprintf_def(fp, HW_FIRST);
+	fprintf_def(fp, HW_LAST);
+	fprintf_def(fp, HW_LIST_SIZE);
+	fprintf_def(fp, READABLE_THRETH_PER_GRAIN);
+	fprintf_def(fp, READABLE_THRETH);
+	fprintf_def(fp, G_FE);
+	fprintf_def(fp, S_FE);
+	fprintf_def(fp, V_FE);
+	fprintf_def(fp, V_PT);
+	fprintf_def(fp, V_CU);
+	fprintf_def(fp, KU_KBULK);
+	fprintf_def(fp, J_FE_FE);
+	fprintf_def(fp, BULK_D_FE_FE);
+	fprintf_def(fp, THERMAL_GRADIENT);
+	fprintf_def(fp, TEMP_AMBIENT);
+	fprintf_def(fp, BIT_AREA);
+	fprintf_def(fp, GRAIN_COUNT);
+	fprintf_def(fp, S_DELTA);
+	fprintf_def(fp, THICKNESS);
+	fprintf_def(fp, GRAIN_VOLUME);
+	fprintf_def(fp, BIT_PITCH);
+	fprintf_def(fp, LINER_VELOCITY);
+	fprintf_def(fp, GRAIN_SD);
+	fprintf_def(fp, GRAIN_MEAN);
+	fprintf_def(fp, TEMP_CURIE_SD);
+	fprintf_def(fp, TEMP_CURIE_MEAN);
+	fprintf_def(fp, FE);
+	fprintf_def(fp, HW_SW_OFFSET);
+	fprintf_def(fp, CBER_HW);
+
+	fprintf_def(fp, BER_ALGORITHM);
+	fprintf_def(fp, INITIAL_MAG_PROB);
+	fprintf_def(fp, ENABLE_KB_CALC);
+	fprintf_def(fp, ENABLE_CBER_CALC);
+	fprintf_def(fp, ENABLE_HW_BER_CALC);
+
+	fprintf_def_str(fp, SIM_TITLE);
+	fprintf_def_str(fp, SIM_COMMENT);
+
+
+
 }
 
 void getFilename(char *buf, char *prefix)
 {
 	time_t now = time(NULL);
 	tm* t = localtime(&now);
-	sprintf(buf, "%s_%s__%04d%02d%02d%_%02d%02d.txt", SIM_TITLE, prefix, t->tm_year+1900, t->tm_mon, t->tm_mday, t->tm_hour, t->tm_min);
+	sprintf(buf, "%04d%02d%02d%_%02d%02d__%s_%s.txt", t->tm_year + 1900, t->tm_mon, t->tm_mday, t->tm_hour, t->tm_min, SIM_TITLE, prefix);
 }
 
 
@@ -863,11 +887,10 @@ void subKbList()
 {
 	char filename[256];
 	getFilename(filename, "kb");
-	sprintf(filename, "%s_kb_list.txt", SIM_TITLE);
 
 	subWriteParam(filename);
 	FILE *fp = fopen(filename, "w");
-	calcKbListHost(fp, 10e+3);
+	calcKbListHost(fp, CBER_HW);
 	fclose(fp);
 }
 
@@ -875,7 +898,6 @@ void subHwBER()
 {
 	char filename[256];
 	getFilename(filename, "hw");
-	sprintf(filename, "%s_hw_list.txt", SIM_TITLE);
 
 	subWriteParam(filename);
 	FILE *fp = fopen(filename, "w");
@@ -905,10 +927,17 @@ int main()
 	auto start = std::chrono::system_clock::now();
 	cudaProfilerStart();
 
+#if ENABLE_KB_CALC != 0
 	subKbList();
-	subContinusBER();
-	subHwBER();
+#endif
 
+#if ENABLE_CBER_CALC != 0
+	subContinusBER();
+#endif
+
+#if ENABLE_HW_BER_CALC != 0
+	subHwBER();
+#endif
 
 	auto end = std::chrono::system_clock::now();
 	auto dur = end - start;

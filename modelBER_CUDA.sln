@@ -5,6 +5,11 @@ VisualStudioVersion = 12.0.40629.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "modelBER_CUDA", "modelBER_CUDA\modelBER_CUDA.vcxproj", "{FC808865-38C8-464E-B13A-53077BED59D2}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "batch_simulator", "batch_simulator", "{6B43FB8C-ED08-4E90-8267-60B22A2E9F52}"
+	ProjectSection(SolutionItems) = preProject
+		batch_build.bat = batch_build.bat
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
