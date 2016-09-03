@@ -8,6 +8,7 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "batch_simulator", "batch_simulator", "{6B43FB8C-ED08-4E90-8267-60B22A2E9F52}"
 	ProjectSection(SolutionItems) = preProject
 		batch_build.bat = batch_build.bat
+		parallel_build.bat = parallel_build.bat
 	EndProjectSection
 EndProject
 Global

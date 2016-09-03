@@ -11,7 +11,7 @@
 #define M_B                         9.27401E-21F         /// <summary>ボーア磁子 (emu)                                          </summary>
 #define S_FE_MEAN_MAX               20.0F                /// <summary>分子場の最大値                                            </summary>
 #define F_AP                        (400e+9F * 2.0F)     /// <summary>マイクロマグによる基本試行頻度(V200 Tc700 Ku/Kbulk0.4)    </summary>
-#define ALPHA_AP                    0.01F                /// <summary> 損失定数                                                 </summary>
+#define ALPHA_AP                    0.1F                 /// <summary> 損失定数                                                 </summary>
 //#define F0_AP                       1.0e+11F           /// <summary>試行頻度(1/s)                                             </summary>
 #define F0_AP                       (ALPHA_AP/(1+ALPHA_AP*ALPHA_AP) * F_AP)
                                                          /// <summary>試行頻度(1/s)                                             </summary>
@@ -40,17 +40,18 @@
 #define LINER_VELOCITY              10                   /// <summary>線速度(m/s nm/ns)                                         </summary>
 #define GRAIN_SD                    0.10F                /// <summary>グレインサイズ標準偏差                                    </summary>
 #define GRAIN_MEAN                  1.0F                 /// <summary>グレインサイズ平均(計算上の)                              </summary>
-#define TEMP_CURIE_SD               0.0F                 /// <summary>Tc標準偏差                                                </summary>
+#define TEMP_CURIE_SD               0.05F                /// <summary>Tc標準偏差                                                </summary>
 #define TEMP_CURIE_MEAN             700.0F               /// <summary>Tc平均                                                    </summary>
 #define FE                          0.5F                 /// <summary>Feの含有割合                                              </summary>
-#define HW_SW_OFFSET                0                    /// <summary>磁界を反転させるタイミング(ap count)                      </summary>
+#define TAU_SFIT_TAU_STC            0                    /// <summary>磁界を反転させるタイミング(τshift/τσTc)                </summary>
 #define CBER_HW                     2.0e+3F              /// <summary>試行周期ごとのbERを算出する際の書込磁界(Oe)               </summary>
 #define BER_ALGORITHM               1                    /// <summary>bER算出アルゴリズム( 0: 純モンテカルロ　1: 確率+パターン  </summary>
-#define INITIAL_MAG_PROB            0.0                  /// <summary>確率パターンにおいて、(記録磁界と反平行)磁化確率の初期値  </summary>
-#define ENABLE_KB_CALC              1                    /// <summary>Kb/Pデータの作成を有効化する(1:有効 0:無効)               </summary>
-#define ENABLE_CBER_CALC            1                    /// <summary>試行周期ごとのbERを計算する (1:有効 0:無効)               </summary>
+#define INITIAL_MAG_PROB            0.5                  /// <summary>確率パターンにおいて、(記録磁界と反平行)磁化確率の初期値  </summary>
+#define ENABLE_KB_CALC              0                    /// <summary>Kb/Pデータの作成を有効化する(1:有効 0:無効)               </summary>
+#define ENABLE_KB_TC_CALC           0                    /// <summary>Kb/Pデータの作成を有効化する(1:有効 0:無効)               </summary>
+#define ENABLE_CBER_CALC            0                    /// <summary>試行周期ごとのbERを計算する (1:有効 0:無効)               </summary>
 #define ENABLE_HW_BER_CALC          1                    /// <summary>Hwごとのbit終端のbER計算    (1:有効 0:無効)               </summary>
-#define SIM_TITLE                    "ALPHA_0.01_Ku_4_Tc_700_TG_05"                     
+#define SIM_TITLE                   "RESULT"                     
                                                          /// <summary> 出力ファイル名に追加されるコメント                       </summary>
 #define SIM_COMMENT                    ""                /// <summary> パラメータ一覧に出力されるコメント                       </summary>
 
