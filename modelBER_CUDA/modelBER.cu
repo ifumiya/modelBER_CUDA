@@ -265,14 +265,14 @@ void calcKbListHostForTcDiff(FILE *fp, float hw)
 	for (int i = 0; i < kb_list_count; i++)
 	{
 		int ap = i - offset;
-		double temp = convertTempFromAP(ap);
-		double kb_list0 = (float)calcKb(temp, +CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 + TEMP_CURIE_SD)));
-		double kb_list1 = (float)calcKb(temp, +CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1)));
-		double kb_list2 = (float)calcKb(temp, +CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 - TEMP_CURIE_SD)));
-
-		double kb_list3 = (float)calcKb(temp, -CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 + TEMP_CURIE_SD)));
-		double kb_list4 = (float)calcKb(temp, -CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1)));
-		double kb_list5 = (float)calcKb(temp, -CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 - TEMP_CURIE_SD)));
+		float temp =(float)convertTempFromAP(ap);
+		double kb_list0 = (double)calcKb(temp, +CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 + TEMP_CURIE_SD)));
+		double kb_list1 = (double)calcKb(temp, +CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1)));
+		double kb_list2 = (double)calcKb(temp, +CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 - TEMP_CURIE_SD)));
+		
+		double kb_list3 = (double)calcKb(temp, -CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 + TEMP_CURIE_SD)));
+		double kb_list4 = (double)calcKb(temp, -CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1)));
+		double kb_list5 = (double)calcKb(temp, -CBER_HW, calcCuFromCurie(TEMP_CURIE_MEAN * (1 - TEMP_CURIE_SD)));
 
 
 
