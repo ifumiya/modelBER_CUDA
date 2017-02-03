@@ -42,6 +42,8 @@
 #define GRAIN_MEAN                  1.0F                 /// <summary>グレインサイズ平均(計算上の)                              </summary>
 #define TEMP_CURIE_SD               0.05F                /// <summary>Tc標準偏差                                                </summary>
 #define TEMP_CURIE_MEAN             700.0F               /// <summary>Tc平均                                                    </summary>
+#define KU_SD						0.0F				 /// <summary>Ku標準偏差												</summary>
+#define KU_MEAN						1.0F				 /// <summary>Ku平均(計算上/係数として)									</summary>
 #define FE                          0.5F                 /// <summary>Feの含有割合                                              </summary>
 #define TAU_SFIT_TAU_STC            0                    /// <summary>磁界を反転させるタイミング(τshift/τσTc)                </summary>
 #define CBER_HW                     2.0e+3F              /// <summary>試行周期ごとのbERを算出する際の書込磁界(Oe)               </summary>
